@@ -1,0 +1,241 @@
+'use client';
+
+import {
+  BookOpen,
+  Check,
+  Clock3,
+  Hand,
+  Languages,
+  Brain,
+  RotateCcw,
+} from 'lucide-react';
+import Link from 'next/link';
+
+import { buttonVariants } from '@/components/ui/button';
+import { Progress, ProgressLabel } from '@/components/ui/progress';
+import { useProgress } from '@/hooks/use-progress';
+import {
+  getMissionLearningState,
+  getMissionReplayAction,
+} from '@/lib/learning-progress';
+import { getMission } from '@/lib/learning-data';
+import { cn } from '@/lib/utils';
+
+const stageDefinitions = [
+  {
+    number: '01',
+    title: 'Amati',
+    description: 'Amati bentuk tangan, arah telapak, dan lintasan demonstrasi.',
+    duration: '2–4 menit',
+    icon: BookOpen,
+  },
+  {
+    number: '02',
+    title: 'Tirukan',
+    description:
+      'Tirukan satu tanda per latihan dan gunakan skor sebagai umpan balik.',
+    duration: '4–10 menit',
+    icon: Hand,
+  },
+  {
+    number: '03',
+    title: 'Uji pengenalan',
+    description:
+      'Ambil kembali arti tanda dari ingatan dan capai minimal 70 poin.',
+    duration: '2 menit',
+    icon: Languages,
+  },
+  {
+    number: '04',
+    title: 'Uji peragaan',
+    description:
+      'Peragakan kata dari ingatan tanpa contoh; checker memeriksa tiap tanda.',
+    duration: '5–10 menit',
+    icon: Brain,
+  },
+] as const;
+
+export function MissionHeroProgress({
+  missionId = 'berkenalan',
+}: {
+  missionId?: string;
+}) {
+  const progress = useProgress();
+  const mission = getMission(missionId);
+  const state = getMissionLearningState(mission, progress);
+  const replay = getMissionReplayAction(mission);
+  const stageCount = mission.type === 'checkpoint' ? 3 : 4;
+  const activeStage =
+    state.missionComplete || state.recognitionComplete
+      ? stageCount
+      : state.practiceComplete
+        ? stageCount - 1
+        : state.practiceStarted
+          ? 2
+          : 1;
+
+  return (
+    <aside className="border border-white/10 bg-white/[0.06] p-6 backdrop-blur-sm">
+      <div className="flex items-end justify-between">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-[0.12em] text-white/50">
+            Progres misi
+          </p>
+          <p className="mt-1 text-3xl font-black">{state.progressPercent}%</p>
+        </div>
+        <span className="text-xs font-bold text-signal-teal">
+          {state.missionComplete
+            ? 'Misi selesai'
+            : `Tahap ${activeStage} dari ${stageCount}`}
+        </span>
+      </div>
+      <Progress value={state.progressPercent} className="mt-5 gap-2">
+        <ProgressLabel className="sr-only">Progres misi</ProgressLabel>
+      </Progress>
+      <Link
+        href={state.missionComplete ? replay.href : state.next.href}
+        className={cn(
+          buttonVariants({ size: 'lg' }),
+          'mt-6 min-h-12 h-auto w-full rounded-2xl bg-signal-teal px-4 py-3 text-center text-sm font-black text-signal-navy hover:bg-signal-teal/90 whitespace-normal leading-snug flex items-center justify-center gap-2 group transition-all',
+        )}
+      >
+        {state.missionComplete ? (
+          <RotateCcw className="size-4 shrink-0" />
+        ) : null}
+        <span className="break-words">
+          {state.missionComplete ? replay.label : state.next.label}
+        </span>
+        <span
+          aria-hidden="true"
+          className="shrink-0 text-base transition-transform group-hover:translate-x-0.5"
+        >
+          →
+        </span>
+      </Link>
+      {!state.practiceComplete ? (
+        <p className="mt-3 text-center text-xs text-white/55">
+          {state.masteredSignCount} dari {state.missionSigns.length} tanda sudah
+          lulus
+        </p>
+      ) : null}
+    </aside>
+  );
+}
+
+export function MissionStageList({
+  missionId = 'berkenalan',
+}: {
+  missionId?: string;
+}) {
+  const progress = useProgress();
+  const mission = getMission(missionId);
+  const learning = getMissionLearningState(mission, progress);
+  const completed = [
+    learning.practiceStarted,
+    learning.practiceComplete,
+    learning.recognitionComplete,
+    learning.missionComplete,
+  ];
+  const currentIndex = completed.findIndex((value) => !value);
+  const visibleStages =
+    mission.type === 'checkpoint'
+      ? stageDefinitions.filter((stage) => stage.title !== 'Tirukan')
+      : stageDefinitions;
+
+  return (
+    <ol
+      className={cn(
+        'grid gap-4',
+        mission.type === 'checkpoint' ? 'lg:grid-cols-3' : 'lg:grid-cols-4',
+      )}
+    >
+      {visibleStages.map((stage, visibleIndex) => {
+        const index = stageDefinitions.indexOf(stage);
+        const state =
+          index === 3
+            ? learning.missionComplete
+              ? 'completed'
+              : learning.recognitionComplete
+                ? 'current'
+                : 'locked'
+            : completed[index]
+              ? 'completed'
+              : index === currentIndex
+                ? 'current'
+                : 'locked';
+        const Icon = stage.icon;
+        return (
+          <li
+            key={stage.number}
+            className={cn(
+              'relative min-h-72 border p-6 sm:p-7',
+              state === 'current' && 'border-signal-yellow bg-signal-yellow/15',
+              state === 'completed' && 'border-signal-teal bg-signal-teal-soft',
+              state === 'locked' && 'border-signal-navy/10 bg-card',
+            )}
+          >
+            <div className="flex items-start justify-between">
+              <span
+                className={cn(
+                  'grid size-12 place-items-center rounded-full',
+                  state === 'completed' && 'bg-signal-teal text-signal-navy',
+                  state === 'current' && 'bg-signal-yellow text-signal-navy',
+                  state === 'locked' && 'bg-muted text-muted-foreground',
+                )}
+              >
+                {state === 'completed' ? (
+                  <Check className="size-5" strokeWidth={3} />
+                ) : (
+                  <Icon className="size-5" />
+                )}
+              </span>
+              <span className="font-mono text-xs font-black text-muted-foreground">
+                {String(visibleIndex + 1).padStart(2, '0')}
+              </span>
+            </div>
+            <p className="mt-7 text-[10px] font-black uppercase tracking-[0.14em] text-muted-foreground">
+              {state === 'completed'
+                ? 'Selesai'
+                : state === 'current'
+                  ? 'Tahap aktif'
+                  : 'Terkunci'}
+            </p>
+            <h3 className="mt-2 text-2xl font-black tracking-[-0.035em] text-signal-navy">
+              {stage.title}
+            </h3>
+            <p className="mt-3 text-sm leading-6 text-muted-foreground">
+              {index === 1
+                ? mission.type === 'alphabet'
+                  ? `Tirukan gerakan ${mission.alphabetLetters?.length ?? 5} huruf satu per satu mengikuti contoh.`
+                  : `Luluskan checker kamera untuk ${mission.signIds.length} tanda, satu per satu.`
+                : index === 2
+                  ? mission.type === 'checkpoint'
+                    ? 'Kenali sampel tanda dari bab tanpa label dan capai minimal 70 poin.'
+                    : mission.type === 'alphabet'
+                      ? 'Kenali huruf tanpa label dan capai minimal 70 poin.'
+                      : 'Kenali tanda misi tanpa label dan capai minimal 70 poin.'
+                  : index === 3 && mission.type === 'alphabet'
+                    ? 'Peragakan huruf dari ingatan tanpa contoh demonstrasi.'
+                    : stage.description}
+            </p>
+            {index === 3 && learning.recognitionComplete ? (
+              <Link
+                href={
+                  mission.type === 'alphabet'
+                    ? `/missions/learn?mission=${mission.id}&section=recall`
+                    : `/missions/test?mission=${mission.id}&mode=recall`
+                }
+                className="mt-4 mb-9 inline-block text-sm font-bold text-emerald-700 underline"
+              >
+                Mulai uji peragaan →
+              </Link>
+            ) : null}
+            <p className="absolute bottom-6 left-6 right-6 flex items-center gap-2 text-xs font-bold text-signal-navy sm:left-7 sm:right-7">
+              <Clock3 className="size-3.5" /> {stage.duration}
+            </p>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
