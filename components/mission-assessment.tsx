@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import { ProductionTest } from '@/components/production-test';
 import { Button } from '@/components/ui/button';
@@ -29,6 +29,7 @@ import {
   chapters,
   getChapterForMission,
   getMission,
+  getMissionPosition,
 } from '@/lib/learning-data';
 import {
   getMissionActiveStageHref,
@@ -36,7 +37,10 @@ import {
   getMissionReplayAction,
   RECOGNITION_PASS_SCORE,
 } from '@/lib/learning-progress';
-import { recordMissionRecognition } from '@/lib/progress-storage';
+import {
+  recordMissionCompletion,
+  recordMissionRecognition,
+} from '@/lib/progress-storage';
 import { calculateScore, calculateStars } from '@/lib/scoring';
 import { cn } from '@/lib/utils';
 
@@ -61,15 +65,29 @@ export function MissionAssessment({
   const searchParamMode = searchParams.get('mode') ?? initialMode;
   const progress = useProgress();
   const learning = getMissionLearningState(mission, progress);
-  const initialView: View = ['context', 'conversation', 'recall'].includes(
-    searchParamMode ?? '',
-  )
-    ? 'recall'
-    : ['result', 'recognition-result'].includes(searchParamMode ?? '')
+  const isCheckpoint = mission.type === 'checkpoint';
+  const isMissionFullyCompleted =
+    learning.missionComplete ||
+    (learning.recognitionComplete &&
+      (isCheckpoint ||
+        learning.productionPassedCount >= learning.productionSignCount));
+
+  const initialView: View = isCheckpoint
+    ? ['result', 'recognition-result'].includes(searchParamMode ?? '')
       ? 'recognition-result'
-      : searchParamMode === 'recognition' || searchParamMode === 'translation'
-        ? 'recognition'
-        : 'menu';
+      : searchParamMode === 'complete' && learning.missionComplete
+        ? 'complete'
+        : 'recognition'
+    : ['context', 'conversation', 'recall'].includes(searchParamMode ?? '')
+      ? 'recall'
+      : ['result', 'recognition-result'].includes(searchParamMode ?? '')
+        ? 'recognition-result'
+        : searchParamMode === 'recognition' || searchParamMode === 'translation'
+          ? 'recognition'
+          : searchParamMode === 'complete' ||
+              (!searchParamMode && isMissionFullyCompleted)
+            ? 'complete'
+            : 'menu';
   const [recognitionAttempt, setRecognitionAttempt] = useState(0);
   const questions = useMemo(
     () => buildRecognitionQuestions(mission, recognitionAttempt),
@@ -77,10 +95,37 @@ export function MissionAssessment({
   );
   const [view, setView] = useState<View>(initialView);
 
+  // When reaching complete view on the final mission before a checkpoint, immediately jump to the chapter test
+  useEffect(() => {
+    if (
+      !isCheckpoint &&
+      (view === 'complete' || searchParamMode === 'complete')
+    ) {
+      const nextIndex = getMissionPosition(mission.id) + 1;
+      const nextMission =
+        nextIndex < allMissions.length ? allMissions[nextIndex] : null;
+      if (nextMission?.type === 'checkpoint') {
+        router.replace(
+          `/missions/test?mission=${nextMission.id}&mode=recognition`,
+        );
+      }
+    }
+  }, [isCheckpoint, mission.id, router, searchParamMode, view]);
+
   const [prevMode, setPrevMode] = useState(searchParamMode);
   if (prevMode !== searchParamMode) {
     setPrevMode(searchParamMode);
-    if (['context', 'conversation', 'recall'].includes(searchParamMode ?? '')) {
+    if (isCheckpoint) {
+      if (['result', 'recognition-result'].includes(searchParamMode ?? '')) {
+        setView('recognition-result');
+      } else if (searchParamMode === 'complete' && learning.missionComplete) {
+        setView('complete');
+      } else {
+        setView('recognition');
+      }
+    } else if (
+      ['context', 'conversation', 'recall'].includes(searchParamMode ?? '')
+    ) {
       setView('recall');
     } else if (
       searchParamMode === 'recognition' ||
@@ -91,6 +136,11 @@ export function MissionAssessment({
       ['result', 'recognition-result'].includes(searchParamMode ?? '')
     ) {
       setView('recognition-result');
+    } else if (
+      searchParamMode === 'complete' ||
+      (!searchParamMode && isMissionFullyCompleted)
+    ) {
+      setView('complete');
     }
   }
   const [index, setIndex] = useState(0);
@@ -128,7 +178,11 @@ export function MissionAssessment({
         action="Kembali ke beranda"
       />
     );
-  if (view === 'recognition' && !learning.practiceComplete)
+  if (
+    !learning.practiceComplete &&
+    searchParamMode !== 'result' &&
+    mission.type !== 'checkpoint'
+  )
     return (
       <Gate
         title="Selesaikan tahap Tirukan"
@@ -137,7 +191,7 @@ export function MissionAssessment({
         action={learning.next.label}
       />
     );
-  if (view === 'recall' && !learning.recognitionComplete)
+  if (view === 'recall' && !isCheckpoint && !learning.recognitionComplete)
     return (
       <Gate
         title="Uji peragaan belum terbuka"
@@ -146,13 +200,26 @@ export function MissionAssessment({
         action={learning.next.label}
       />
     );
-  if (view === 'recall')
+  if (view === 'recall' && !isCheckpoint)
     return (
       <ProductionTest
         missionId={mission.id}
         onExit={() => {
-          router.replace(`/missions/test?mission=${mission.id}`);
-          setView(learning.missionComplete ? 'complete' : 'menu');
+          recordMissionCompletion(mission.id);
+          const nextIndex = getMissionPosition(mission.id) + 1;
+          const nextMission =
+            nextIndex < allMissions.length ? allMissions[nextIndex] : null;
+          if (nextMission?.type === 'checkpoint') {
+            router.replace(
+              `/missions/test?mission=${nextMission.id}&mode=recognition`,
+            );
+            return;
+          }
+          const nextView = isMissionFullyCompleted ? 'complete' : 'menu';
+          router.replace(
+            `/missions/test?mission=${mission.id}${nextView === 'complete' ? '&mode=complete' : ''}`,
+          );
+          setView(nextView);
         }}
       />
     );
@@ -229,10 +296,10 @@ export function MissionAssessment({
         <div className="grid grid-cols-1 lg:grid-cols-[1.15fr_0.85fr] gap-8 sm:gap-10 items-start">
           {/* Left Column: Video */}
           <div>
-            <span className="text-xs font-black uppercase tracking-wider text-[#E54D2E] block">
+            <span className="text-xs font-bold uppercase tracking-wider text-[#E54D2E] block">
               {isTyping ? 'TERJEMAHKAN TANDA' : 'PERHATIKAN TANDA'}
             </span>
-            <h2 className="mt-1 text-xl sm:text-2xl font-black tracking-tight text-slate-900">
+            <h2 className="mt-1 text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
               Apa arti tanda dalam video ini?
             </h2>
             <div className="relative mt-4 aspect-[16/10] w-full overflow-hidden rounded-2xl bg-black shadow-inner">
@@ -257,7 +324,7 @@ export function MissionAssessment({
           <div className="flex flex-col justify-between h-full pt-1">
             {isTyping ? (
               <div>
-                <span className="text-sm sm:text-base font-black text-slate-900 block mb-3">
+                <span className="text-sm sm:text-base font-bold text-slate-900 block mb-3">
                   Ketik kata yang diisyaratkan dalam video
                 </span>
                 <input
@@ -283,7 +350,7 @@ export function MissionAssessment({
               </div>
             ) : (
               <div>
-                <span className="text-xs font-black uppercase tracking-wider text-slate-900 block mb-4">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-900 block mb-4">
                   PILIH SATU JAWABAN
                 </span>
                 <div className="space-y-3" role="radiogroup">
@@ -304,7 +371,7 @@ export function MissionAssessment({
                       >
                         <span
                           className={cn(
-                            'grid size-8 sm:size-9 shrink-0 place-items-center rounded-full border text-xs sm:text-sm font-black transition-colors',
+                            'grid size-8 sm:size-9 shrink-0 place-items-center rounded-full border text-xs sm:text-sm font-bold transition-colors',
                             isSelected
                               ? 'border-slate-900 bg-slate-900 text-white'
                               : 'border-slate-200 bg-white text-slate-700',
@@ -312,7 +379,7 @@ export function MissionAssessment({
                         >
                           {String.fromCharCode(65 + optionIndex)}
                         </span>
-                        <span className="text-sm sm:text-base font-black text-slate-900">
+                        <span className="text-sm sm:text-base font-bold text-slate-900">
                           {option.label}
                         </span>
                       </button>
@@ -327,7 +394,7 @@ export function MissionAssessment({
               onClick={submit}
               disabled={!canSubmit}
               className={cn(
-                'mt-6 flex h-14 w-full items-center justify-center gap-2 rounded-2xl text-sm font-black transition-all shadow-xs cursor-pointer',
+                'mt-6 flex h-14 w-full items-center justify-center gap-2 rounded-2xl text-sm font-bold transition-all shadow-xs cursor-pointer',
                 canSubmit
                   ? 'bg-slate-900 text-white hover:bg-slate-800 active:scale-[0.99]'
                   : 'bg-[#7E858B] text-white cursor-not-allowed opacity-90',
@@ -381,11 +448,11 @@ export function MissionAssessment({
                   <Trophy className="size-9 sm:size-10 stroke-[2.3]" />
                 </div>
 
-                <span className="mt-3 text-xs font-black uppercase tracking-wider text-[#E54D2E]">
+                <span className="mt-3 text-xs font-bold uppercase tracking-wider text-[#E54D2E]">
                   {isCheckpoint ? 'HASIL TES' : 'HASIL LATIHAN'}
                 </span>
 
-                <span className="mt-1 text-6xl sm:text-7xl lg:text-8xl font-black tracking-tight text-slate-900 leading-none">
+                <span className="mt-1 text-6xl sm:text-7xl lg:text-8xl font-bold tracking-tight text-slate-900 leading-none">
                   {score}
                 </span>
 
@@ -395,11 +462,11 @@ export function MissionAssessment({
 
             {/* Right: Info, Question Pills & Action Buttons matching Image */}
             <div className="flex flex-col items-start justify-center">
-              <span className="inline-flex items-center rounded-full bg-[#00BDCD] px-4 sm:px-5 py-1.5 text-xs sm:text-sm font-black text-white shadow-2xs">
+              <span className="inline-flex items-center rounded-full bg-[#00BDCD] px-4 sm:px-5 py-1.5 text-xs sm:text-sm font-bold text-white shadow-2xs">
                 {isCheckpoint ? 'Bab berikutnya terbuka!' : 'Tahap pengenalan lulus!'}
               </span>
 
-              <h2 className="mt-4 text-2xl sm:text-3xl lg:text-4xl font-black tracking-tight text-slate-900">
+              <h2 className="mt-4 text-2xl sm:text-3xl lg:text-4xl font-bold tracking-tight text-slate-900">
                 {correct} dari {questions.length} jawaban benar !
               </h2>
 
@@ -414,7 +481,7 @@ export function MissionAssessment({
                 {questions.map((_, i) => (
                   <div
                     key={i}
-                    className="inline-flex min-w-[68px] sm:min-w-[76px] items-center justify-center rounded-full border-2 border-[#00BDCD] bg-white px-5 sm:px-6 py-2 text-sm font-black text-slate-900 shadow-2xs"
+                    className="inline-flex min-w-[68px] sm:min-w-[76px] items-center justify-center rounded-full border-2 border-[#00BDCD] bg-white px-5 sm:px-6 py-2 text-sm font-bold text-slate-900 shadow-2xs"
                   >
                     {String(i + 1).padStart(2, '0')}
                   </div>
@@ -431,7 +498,7 @@ export function MissionAssessment({
                     );
                     startRecognition();
                   }}
-                  className="inline-flex items-center gap-2 rounded-full bg-[#FFAE00] px-6 sm:px-7 py-3 sm:py-3.5 text-sm sm:text-base font-black text-slate-950 shadow-xs transition-transform hover:bg-[#ff9f00] hover:scale-105 active:scale-95 cursor-pointer"
+                  className="inline-flex items-center gap-2 rounded-full bg-[#FFAE00] px-6 sm:px-7 py-3 sm:py-3.5 text-sm sm:text-base font-bold text-slate-950 shadow-xs transition-transform hover:bg-[#ff9f00] hover:scale-105 active:scale-95 cursor-pointer"
                 >
                   <RotateCcw className="size-4 stroke-[2.5]" />
                   <span>Coba lagi</span>
@@ -440,16 +507,28 @@ export function MissionAssessment({
                 {isCheckpoint ? (
                   <Link
                     href={nextChapterHref}
-                    className="inline-flex items-center gap-2 rounded-full bg-[#FFAE00] px-7 sm:px-8 py-3 sm:py-3.5 text-sm sm:text-base font-black text-slate-950 shadow-xs transition-transform hover:bg-[#ff9f00] hover:scale-105 active:scale-95 cursor-pointer"
+                    className="inline-flex items-center gap-2 rounded-full bg-[#FFAE00] px-7 sm:px-8 py-3 sm:py-3.5 text-sm sm:text-base font-bold text-slate-950 shadow-xs transition-transform hover:bg-[#ff9f00] hover:scale-105 active:scale-95 cursor-pointer"
                   >
-                    <span>Lanjut Bab selanjutnya</span>
+                    <span>{nextChapter ? 'Lanjut Bab selanjutnya' : 'Kembali ke Beranda'}</span>
+                    <ArrowRight className="size-4 stroke-[2.5]" />
+                  </Link>
+                ) : learning.productionPassedCount >= learning.productionSignCount ? (
+                  <Link
+                    href={`/missions/test?mission=${mission.id}&mode=complete`}
+                    onClick={() => {
+                      recordMissionCompletion(mission.id);
+                      setView('complete');
+                    }}
+                    className="inline-flex items-center gap-2 rounded-full bg-[#FFAE00] px-7 sm:px-8 py-3 sm:py-3.5 text-sm sm:text-base font-bold text-slate-950 shadow-xs transition-transform hover:bg-[#ff9f00] hover:scale-105 active:scale-95 cursor-pointer"
+                  >
+                    <span>Lihat Hasil Misi</span>
                     <ArrowRight className="size-4 stroke-[2.5]" />
                   </Link>
                 ) : (
                   <Link
                     href={`/missions/test?mission=${mission.id}&mode=recall`}
                     onClick={() => setView('recall')}
-                    className="inline-flex items-center gap-2 rounded-full bg-[#FFAE00] px-7 sm:px-8 py-3 sm:py-3.5 text-sm sm:text-base font-black text-slate-950 shadow-xs transition-transform hover:bg-[#ff9f00] hover:scale-105 active:scale-95 cursor-pointer"
+                    className="inline-flex items-center gap-2 rounded-full bg-[#FFAE00] px-7 sm:px-8 py-3 sm:py-3.5 text-sm sm:text-base font-bold text-slate-950 shadow-xs transition-transform hover:bg-[#ff9f00] hover:scale-105 active:scale-95 cursor-pointer"
                   >
                     <span>Lanjut ke Uji peragaan</span>
                     <ArrowRight className="size-4 stroke-[2.5]" />
@@ -474,11 +553,11 @@ export function MissionAssessment({
                 <Trophy className="size-9 sm:size-10 stroke-[2.3]" />
               </div>
 
-              <span className="mt-3 text-xs font-black uppercase tracking-wider text-[#E54D2E]">
+              <span className="mt-3 text-xs font-bold uppercase tracking-wider text-[#E54D2E]">
                 {isCheckpoint ? 'HASIL TES' : 'HASIL LATIHAN'}
               </span>
 
-              <span className="mt-1 text-6xl sm:text-7xl lg:text-8xl font-black tracking-tight text-slate-900 leading-none">
+              <span className="mt-1 text-6xl sm:text-7xl lg:text-8xl font-bold tracking-tight text-slate-900 leading-none">
                 {score}
               </span>
 
@@ -490,14 +569,14 @@ export function MissionAssessment({
           <div className="flex flex-col items-start justify-center">
             <span
               className={cn(
-                'inline-flex items-center rounded-full px-4 sm:px-5 py-1.5 text-xs sm:text-sm font-black text-white shadow-2xs',
+                'inline-flex items-center rounded-full px-4 sm:px-5 py-1.5 text-xs sm:text-sm font-bold text-white shadow-2xs',
                 passed ? 'bg-[#00BDCD]' : 'bg-[#E54D2E]',
               )}
             >
               {passed ? 'Lulus' : 'Perlu diulang'}
             </span>
 
-            <h2 className="mt-4 text-2xl sm:text-3xl lg:text-4xl font-black tracking-tight text-slate-900">
+            <h2 className="mt-4 text-2xl sm:text-3xl lg:text-4xl font-bold tracking-tight text-slate-900">
               {correct} dari {questions.length} jawaban benar
             </h2>
 
@@ -515,7 +594,7 @@ export function MissionAssessment({
                   <div
                     key={i}
                     className={cn(
-                      'inline-flex min-w-[68px] sm:min-w-[76px] items-center justify-center rounded-full border-2 px-5 sm:px-6 py-2 text-sm font-black shadow-2xs',
+                      'inline-flex min-w-[68px] sm:min-w-[76px] items-center justify-center rounded-full border-2 px-5 sm:px-6 py-2 text-sm font-bold shadow-2xs',
                       isCorrect
                         ? 'border-[#00BDCD] bg-white text-slate-900'
                         : 'border-[#E54D2E] bg-[#FFF0ED] text-[#E54D2E]',
@@ -530,7 +609,7 @@ export function MissionAssessment({
             {/* Missed answers list if any */}
             {missedAnswers.length > 0 && (
               <div className="mt-6 w-full rounded-2xl border border-amber-200/60 bg-[#FFFDF5] p-4 sm:p-5">
-                <p className="text-xs font-black uppercase tracking-wider text-[#E54D2E]">
+                <p className="text-xs font-bold uppercase tracking-wider text-[#E54D2E]">
                   Tanda yang perlu diperkuat :
                 </p>
                 <ul className="mt-2.5 space-y-2 text-xs sm:text-sm">
@@ -551,7 +630,7 @@ export function MissionAssessment({
                       </span>
                       <Link
                         href={`/missions/practice?mission=${mission.id}&sign=${answer.signId}`}
-                        className="font-black text-amber-600 hover:text-amber-700 underline"
+                        className="font-bold text-amber-600 hover:text-amber-700 underline"
                       >
                         Latih ulang
                       </Link>
@@ -571,7 +650,7 @@ export function MissionAssessment({
                   );
                   startRecognition();
                 }}
-                className="inline-flex items-center gap-2 rounded-full bg-[#FFAE00] px-6 sm:px-7 py-3 sm:py-3.5 text-sm sm:text-base font-black text-slate-950 shadow-xs transition-transform hover:bg-[#ff9f00] hover:scale-105 active:scale-95 cursor-pointer"
+                className="inline-flex items-center gap-2 rounded-full bg-[#FFAE00] px-6 sm:px-7 py-3 sm:py-3.5 text-sm sm:text-base font-bold text-slate-950 shadow-xs transition-transform hover:bg-[#ff9f00] hover:scale-105 active:scale-95 cursor-pointer"
               >
                 <RotateCcw className="size-4 stroke-[2.5]" />
                 <span>Coba lagi</span>
@@ -581,16 +660,28 @@ export function MissionAssessment({
                 isCheckpoint ? (
                   <Link
                     href={nextChapterHref}
-                    className="inline-flex items-center gap-2 rounded-full bg-[#FFAE00] px-7 sm:px-8 py-3 sm:py-3.5 text-sm sm:text-base font-black text-slate-950 shadow-xs transition-transform hover:bg-[#ff9f00] hover:scale-105 active:scale-95 cursor-pointer"
+                    className="inline-flex items-center gap-2 rounded-full bg-[#FFAE00] px-7 sm:px-8 py-3 sm:py-3.5 text-sm sm:text-base font-bold text-slate-950 shadow-xs transition-transform hover:bg-[#ff9f00] hover:scale-105 active:scale-95 cursor-pointer"
                   >
-                    <span>Lanjut Bab selanjutnya</span>
+                    <span>{nextChapter ? 'Lanjut Bab selanjutnya' : 'Kembali ke Beranda'}</span>
+                    <ArrowRight className="size-4 stroke-[2.5]" />
+                  </Link>
+                ) : learning.productionPassedCount >= learning.productionSignCount ? (
+                  <Link
+                    href={`/missions/test?mission=${mission.id}&mode=complete`}
+                    onClick={() => {
+                      recordMissionCompletion(mission.id);
+                      setView('complete');
+                    }}
+                    className="inline-flex items-center gap-2 rounded-full bg-[#FFAE00] px-7 sm:px-8 py-3 sm:py-3.5 text-sm sm:text-base font-bold text-slate-950 shadow-xs transition-transform hover:bg-[#ff9f00] hover:scale-105 active:scale-95 cursor-pointer"
+                  >
+                    <span>Lihat Hasil Misi</span>
                     <ArrowRight className="size-4 stroke-[2.5]" />
                   </Link>
                 ) : (
                   <Link
                     href={`/missions/test?mission=${mission.id}&mode=recall`}
                     onClick={() => setView('recall')}
-                    className="inline-flex items-center gap-2 rounded-full bg-[#FFAE00] px-7 sm:px-8 py-3 sm:py-3.5 text-sm sm:text-base font-black text-slate-950 shadow-xs transition-transform hover:bg-[#ff9f00] hover:scale-105 active:scale-95 cursor-pointer"
+                    className="inline-flex items-center gap-2 rounded-full bg-[#FFAE00] px-7 sm:px-8 py-3 sm:py-3.5 text-sm sm:text-base font-bold text-slate-950 shadow-xs transition-transform hover:bg-[#ff9f00] hover:scale-105 active:scale-95 cursor-pointer"
                   >
                     <span>Lanjut ke Uji peragaan</span>
                     <ArrowRight className="size-4 stroke-[2.5]" />
@@ -604,49 +695,81 @@ export function MissionAssessment({
     );
   }
 
-  if (view === 'complete' && learning.missionComplete) {
-    const missionIndex = allMissions.findIndex(
-      (item) => item.id === mission.id,
-    );
-    const nextMission =
-      missionIndex >= 0
-        ? missionIndex + 1 < allMissions.length
-          ? allMissions[missionIndex + 1]
-          : null
-        : null;
+  const missionIndex = allMissions.findIndex((item) => item.id === mission.id);
+  const nextMission =
+    missionIndex >= 0 && missionIndex + 1 < allMissions.length
+      ? allMissions[missionIndex + 1]
+      : null;
+  const currentChapter = getChapterForMission(mission.id);
+  const isLastMissionInChapter =
+    currentChapter.missions[currentChapter.missions.length - 1]?.id ===
+    mission.id;
+
+  if (view === 'complete' || (isMissionFullyCompleted && searchParamMode !== 'menu')) {
     const replay = getMissionReplayAction(mission);
     return (
-      <div className="rounded-[2.5rem] bg-white p-8 sm:p-12 shadow-xs border border-amber-200/50 text-center">
-        <div className="max-w-xl mx-auto">
-          <span className="mx-auto grid size-20 place-items-center rounded-full bg-emerald-100 text-emerald-700 shadow-sm">
-            <Check className="size-9" strokeWidth={3} />
-          </span>
-          <p className="mt-6 text-xs font-black uppercase tracking-wider text-[#E54D2E]">
-            Misi selesai
-          </p>
-          <h2 className="mt-2 text-3xl sm:text-4xl font-black text-slate-900 tracking-tight">
-            Target latihan “{mission.title}” selesai
+      <div className="rounded-[2.5rem] bg-white p-8 sm:p-12 shadow-xs border border-amber-200/50 text-center max-w-2xl mx-auto">
+        <div>
+          <div className="mx-auto flex size-20 items-center justify-center rounded-full bg-[#FFAE00] text-slate-950 shadow-xs">
+            <Trophy className="size-10 stroke-[2.3]" />
+          </div>
+          <div className="mt-5 flex items-center justify-center gap-2">
+            <span className="rounded-full bg-[#00D5D1] px-4 py-1 text-xs font-bold text-slate-900 shadow-2xs">
+              Bab {currentChapter.number.replace(/^0/, '')} • Misi {mission.number}
+            </span>
+            <span className="rounded-full border border-emerald-500 bg-emerald-50 px-3.5 py-1 text-xs font-bold text-emerald-700">
+              Misi Selesai
+            </span>
+          </div>
+          <h2 className="mt-4 text-3xl sm:text-4xl font-bold text-slate-900 tracking-tight">
+            Target “{mission.title}” Berhasil Diselesaikan!
           </h2>
-          <p className="mt-3 text-sm sm:text-base leading-relaxed text-slate-600">
-            {mission.type === 'checkpoint'
-              ? 'Uji pengenalan dan Uji peragaan'
-              : 'Tirukan, uji pengenalan, dan Uji peragaan'}{' '}
-            selesai. Kamu dapat melanjutkan ke misi berikutnya atau review
-            berkala.
+          <p className="mt-3 text-sm sm:text-base leading-relaxed text-slate-600 font-medium max-w-lg mx-auto">
+            Luar biasa! Kamu telah menuntaskan seluruh tahapan latihan (Amati, Tirukan, Uji Pengenalan, dan Uji Peragaan). Kosakata ini kini sudah tersimpan dalam progres belajarmu.
           </p>
-          <div className="mt-8 flex flex-wrap justify-center gap-3">
-            <Link
-              href={nextMission?.href ?? '/review'}
-              className="rounded-full bg-slate-900 px-7 py-3.5 text-sm font-black text-white hover:bg-slate-800 transition-all shadow-sm flex items-center gap-2"
-            >
-              {nextMission
-                ? `Lanjut: ${nextMission.title}`
-                : 'Mulai review adaptif'}{' '}
-              <ArrowRight className="size-4" />
-            </Link>
+
+          <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-2.5 text-center">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 block">Uji Pengenalan</span>
+              <span className="text-base font-bold text-slate-900">{learning.recognitionScore}/100</span>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-2.5 text-center">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 block">Uji Peragaan</span>
+              <span className="text-base font-bold text-emerald-700">{learning.productionPassedCount}/{learning.productionSignCount} Lulus</span>
+            </div>
+            <div className="rounded-2xl border border-amber-200 bg-[#FFF9E6] px-5 py-2.5 text-center">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-amber-700 block">Reward XP</span>
+              <span className="text-base font-bold text-amber-900">+{mission.xp} XP</span>
+            </div>
+          </div>
+
+          <div className="mt-8 flex flex-wrap justify-center gap-3.5">
+            {nextMission ? (
+              <Link
+                href={getMissionActiveStageHref(nextMission, progress)}
+                className="inline-flex items-center gap-2 rounded-full bg-[#FFAE00] px-8 py-3.5 text-sm sm:text-base font-bold text-slate-950 shadow-xs hover:bg-[#ff9f00] hover:scale-105 active:scale-95 transition-all cursor-pointer"
+              >
+                <span>
+                  {nextMission.type === 'checkpoint'
+                    ? `Mulai Tes Bab ${getChapterForMission(nextMission.id).number.replace(/^0/, '')}`
+                    : isLastMissionInChapter
+                      ? 'Lanjut ke Bab Berikutnya'
+                      : `Lanjut: ${nextMission.title}`}
+                </span>
+                <ArrowRight className="size-4 stroke-[2.5]" />
+              </Link>
+            ) : (
+              <Link
+                href="/"
+                className="inline-flex items-center gap-2 rounded-full bg-[#FFAE00] px-8 py-3.5 text-sm sm:text-base font-bold text-slate-950 shadow-xs hover:bg-[#ff9f00] hover:scale-105 active:scale-95 transition-all cursor-pointer"
+              >
+                <span>Kembali ke Beranda</span>
+                <ArrowRight className="size-4 stroke-[2.5]" />
+              </Link>
+            )}
             <Link
               href={replay.href}
-              className="rounded-full border-2 border-slate-200 bg-white px-6 py-3.5 text-sm font-black text-slate-800 hover:bg-slate-50 transition-all flex items-center gap-2"
+              className="rounded-full border-2 border-slate-200 bg-white px-6 py-3.5 text-sm font-bold text-slate-800 hover:bg-slate-50 transition-all flex items-center gap-2 cursor-pointer"
             >
               <RefreshCw className="size-4" /> {replay.label}
             </Link>
@@ -658,6 +781,38 @@ export function MissionAssessment({
 
   return (
     <section className="grid gap-5 lg:grid-cols-2">
+      {isMissionFullyCompleted && (
+        <div className="lg:col-span-2 rounded-3xl border-2 border-emerald-300 bg-[#EDFDFA] p-5 shadow-xs flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-3.5">
+            <div className="flex size-10 shrink-0 items-center justify-center rounded-2xl bg-[#00BDCD] text-white shadow-xs">
+              <Check className="size-6 stroke-[3]" />
+            </div>
+            <div>
+              <p className="text-sm font-bold text-slate-900">
+                🎉 Target latihan ini sudah kamu selesaikan!
+              </p>
+              <p className="text-xs font-semibold text-slate-600">
+                Kamu dapat melanjutkan perjalanan ke misi berikutnya atau melatih kembali materi ini.
+              </p>
+            </div>
+          </div>
+          {nextMission && (
+            <Link
+              href={getMissionActiveStageHref(nextMission, progress)}
+              className="inline-flex items-center gap-2 rounded-full bg-[#FFAE00] px-6 py-2.5 text-xs sm:text-sm font-bold text-slate-950 shadow-xs hover:bg-[#ff9f00] hover:scale-105 transition-transform"
+            >
+              <span>
+                {nextMission.type === 'checkpoint'
+                  ? `Mulai Tes Bab ${getChapterForMission(nextMission.id).number.replace(/^0/, '')}`
+                  : isLastMissionInChapter
+                    ? 'Lanjut Bab Berikutnya'
+                    : `Lanjut: ${nextMission.title}`}
+              </span>
+              <ArrowRight className="size-4 stroke-[2.5]" />
+            </Link>
+          )}
+        </div>
+      )}
       <ModeCard
         icon={Video}
         eyebrow={mission.type === 'checkpoint' ? 'Tahap 2' : 'Tahap 3'}
@@ -707,10 +862,10 @@ function ModeCard({
         <span className="grid size-14 place-items-center rounded-2xl bg-amber-100 text-amber-900">
           <Icon className="size-6" />
         </span>
-        <p className="mt-6 text-xs font-black uppercase tracking-wider text-[#E54D2E]">
+        <p className="mt-6 text-xs font-bold uppercase tracking-wider text-[#E54D2E]">
           {eyebrow}
         </p>
-        <h2 className="mt-1.5 text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
+        <h2 className="mt-1.5 text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight">
           {title}
         </h2>
         <p className="mt-3 text-sm leading-relaxed text-slate-600">
@@ -723,7 +878,7 @@ function ModeCard({
           <Link
             href={href}
             onClick={onStart}
-            className="rounded-full bg-slate-900 px-6 py-2.5 text-sm font-black text-white hover:bg-slate-800 transition-all flex items-center gap-2"
+            className="rounded-full bg-slate-900 px-6 py-2.5 text-sm font-bold text-white hover:bg-slate-800 transition-all flex items-center gap-2"
           >
             <Play className="size-4" /> Mulai
           </Link>
@@ -732,7 +887,7 @@ function ModeCard({
             onClick={onStart}
             disabled={locked}
             className={cn(
-              'rounded-full px-6 py-2.5 text-sm font-black transition-all flex items-center gap-2',
+              'rounded-full px-6 py-2.5 text-sm font-bold transition-all flex items-center gap-2',
               locked
                 ? 'bg-slate-100 text-slate-400'
                 : 'bg-slate-900 text-white hover:bg-slate-800',
@@ -768,7 +923,7 @@ function Gate({
         <span className="mx-auto grid size-16 place-items-center rounded-2xl bg-amber-100 text-amber-900">
           <LockKeyhole className="size-7" />
         </span>
-        <h2 className="mt-5 text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
+        <h2 className="mt-5 text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight">
           {title}
         </h2>
         <p className="mt-2.5 text-sm leading-relaxed text-slate-600">
@@ -776,7 +931,7 @@ function Gate({
         </p>
         <Link
           href={href}
-          className="mt-6 inline-flex items-center gap-2 rounded-full bg-slate-900 px-7 py-3 text-sm font-black text-white hover:bg-slate-800 transition-all shadow-sm"
+          className="mt-6 inline-flex items-center gap-2 rounded-full bg-slate-900 px-7 py-3 text-sm font-bold text-white hover:bg-slate-800 transition-all shadow-sm"
         >
           {action} <ArrowRight className="size-4" />
         </Link>

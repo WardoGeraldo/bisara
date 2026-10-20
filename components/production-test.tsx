@@ -2,7 +2,7 @@
 
 import { ArrowRight, Check, RotateCcw } from 'lucide-react';
 import Link from 'next/link';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { CameraPractice } from '@/components/camera-practice';
 import { Button } from '@/components/ui/button';
@@ -16,6 +16,7 @@ import { allMissions } from '@/lib/learning-data';
 import {
   getProductionTestSignIds,
   hasPassedProductionTest,
+  recordMissionCompletion,
   recordProductionAssessment,
 } from '@/lib/progress-storage';
 import { useProgress } from '@/hooks/use-progress';
@@ -40,6 +41,17 @@ export function ProductionTest({
   } | null>(null);
   const activeSignId = selectedSignId ?? remainingIds[0];
 
+  useEffect(() => {
+    if (!activeSignId && signIds.length > 0) {
+      recordMissionCompletion(missionId);
+    }
+  }, [activeSignId, missionId, signIds.length]);
+
+  const currentMissionIndex = allMissions.findIndex((m) => m.id === missionId);
+  const nextMission =
+    currentMissionIndex >= 0 ? allMissions[currentMissionIndex + 1] : null;
+  const isNextCheckpoint = nextMission?.type === 'checkpoint';
+
   if (!activeSignId) {
     return (
       <section className="rounded-[2.5rem] bg-white p-8 sm:p-12 shadow-xs border border-amber-200/50 text-center max-w-xl mx-auto space-y-6">
@@ -47,7 +59,7 @@ export function ProductionTest({
           <Check className="size-8 stroke-[2.5]" />
         </div>
         <div>
-          <h2 className="text-2xl sm:text-3xl font-black text-slate-900">
+          <h2 className="text-2xl sm:text-3xl font-bold text-slate-900">
             Uji Peragaan Selesai!
           </h2>
           <p className="mt-3 text-sm font-medium text-slate-600 leading-relaxed">
@@ -55,10 +67,14 @@ export function ProductionTest({
           </p>
         </div>
         <Button
-          onClick={onExit}
-          className="h-12 w-full rounded-2xl bg-slate-900 text-white font-bold hover:bg-slate-800 transition-all text-sm flex items-center justify-center gap-2 shadow-xs"
+          onClick={() => {
+            recordMissionCompletion(missionId);
+            onExit();
+          }}
+          className="h-12 w-full rounded-2xl bg-slate-900 text-white font-bold hover:bg-slate-800 transition-all text-sm flex items-center justify-center gap-2 shadow-xs cursor-pointer"
         >
-          Lihat Hasil Misi <ArrowRight className="size-4" />
+          {isNextCheckpoint ? 'Lanjut ke Tes Bab' : 'Lihat Hasil Misi'}{' '}
+          <ArrowRight className="size-4" />
         </Button>
       </section>
     );
@@ -83,7 +99,7 @@ export function ProductionTest({
 
   return (
     <section className="space-y-6">
-      <div className="rounded-[2.5rem] bg-white p-6 sm:p-8 lg:p-10 shadow-xs border border-amber-200/50">
+      <div className="rounded-[2rem] bg-white p-4 shadow-xs border border-amber-200/50 sm:rounded-[2.5rem] sm:p-8 lg:p-10">
         {/* Top Progress Track matching reference */}
         <div className="mb-6 sm:mb-8 border-b border-slate-100 pb-6">
           <div className="flex items-center justify-between text-xs sm:text-sm font-bold">
@@ -103,10 +119,10 @@ export function ProductionTest({
         {/* Question Heading matching reference */}
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
-            <span className="text-xs font-black uppercase tracking-wider text-[#E54D2E] block">
+            <span className="text-xs font-bold uppercase tracking-wider text-[#E54D2E] block">
               TIRUKAN TANDA
             </span>
-            <h2 className="mt-1 text-xl sm:text-2xl lg:text-3xl font-black tracking-tight text-slate-900">
+            <h2 className="mt-1 text-xl sm:text-2xl lg:text-3xl font-bold tracking-tight text-slate-900">
               Tunjukkan isyarat untuk kata: <span className="text-slate-900">{sign.label}</span>
             </h2>
           </div>
@@ -170,7 +186,7 @@ export function ProductionTest({
                 <Check className="size-5 stroke-[3]" />
               </div>
               <p className="text-sm font-bold text-emerald-950">
-                Hebat! Tanda <span className="font-black underline">{sign.label}</span> lulus uji tanpa contoh.
+                Hebat! Tanda <span className="font-bold underline">{sign.label}</span> lulus uji tanpa contoh.
               </p>
             </div>
             <Button

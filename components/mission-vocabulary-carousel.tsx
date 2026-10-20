@@ -3,17 +3,22 @@
 import { ChevronRight } from 'lucide-react';
 import { useRef, useState } from 'react';
 
-import type { SignDefinition } from '@/lib/curriculum-data';
 import { versionedSignVideo } from '@/lib/curriculum-data';
 import type { Mission } from '@/lib/learning-data';
 import { cn } from '@/lib/utils';
+
+export type CarouselSignItem = {
+  id: string;
+  label: string;
+  videoSrc: string;
+};
 
 export function MissionVocabularyCarousel({
   mission,
   signs,
 }: {
   mission: Mission;
-  signs: SignDefinition[];
+  signs: CarouselSignItem[];
 }) {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [activeIndices, setActiveIndices] = useState<number[]>([0, 1]);
@@ -75,21 +80,23 @@ export function MissionVocabularyCarousel({
     <section className="mt-8 grid grid-cols-1 lg:grid-cols-[330px_1fr] xl:grid-cols-[360px_1fr] gap-8 items-start">
       {/* Left: Target Pembelajaran Card matching Image 0 */}
       <div className="rounded-[2.25rem] bg-white p-6 sm:p-7 border border-amber-200/50 shadow-xs">
-        <span className="text-xs font-black uppercase tracking-wider text-slate-900 block">
+        <span className="text-xs font-bold uppercase tracking-wider text-slate-900 block">
           TARGET PEMBELAJARAN
         </span>
         <div className="mt-3.5 flex items-center gap-2.5">
           <span className="grid size-7 place-items-center rounded-full border-2 border-[#E54D2E] text-[#E54D2E]">
             <span className="size-2 rounded-full bg-[#E54D2E]" />
           </span>
-          <h2 className="text-xl sm:text-2xl font-black tracking-tight text-slate-900">
-            {signs.length} KOSA KATA
+          <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
+            {signs.length} {mission.type === 'alphabet' ? 'HURUF ALFABET' : 'KOSA KATA'}
           </h2>
         </div>
         <p className="mt-2 text-xs sm:text-sm font-semibold text-slate-500 leading-relaxed">
           {mission.type === 'checkpoint'
             ? 'Mengenali dan menguasai seluruh vocabulary pada bab ini'
-            : 'Mengenali vocabulary dasar terkait identitas dan komunikasi Tuli'}
+            : mission.type === 'alphabet'
+              ? 'Mengenali bentuk jari dan demonstrasi alfabet jari BISINDO'
+              : 'Mengenali vocabulary dasar terkait identitas dan komunikasi Tuli'}
         </p>
 
         {/* Vocabulary Pills Grid */}
@@ -102,7 +109,7 @@ export function MissionVocabularyCarousel({
                 type="button"
                 onClick={() => scrollToSign(index)}
                 className={cn(
-                  'rounded-xl border-2 px-3 py-2.5 text-center text-sm font-black transition-all cursor-pointer select-none',
+                  'rounded-xl border-2 px-3 py-2.5 text-center text-sm font-bold transition-all cursor-pointer select-none',
                   isVisible
                     ? 'border-slate-900 bg-slate-900 text-white shadow-xs'
                     : 'border-slate-300 bg-white text-slate-900 hover:border-slate-500',
@@ -118,11 +125,15 @@ export function MissionVocabularyCarousel({
       {/* Right: Video Demonstration Carousel matching Image 0 */}
       <div className="flex flex-col justify-between min-w-0">
         <div>
-          <h2 className="text-2xl sm:text-3xl font-black tracking-tight text-slate-900">
-            Amati setiap tanda sebelum menirukan :
+          <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900">
+            {mission.type === 'alphabet'
+              ? 'Amati setiap huruf sebelum menirukan :'
+              : 'Amati setiap tanda sebelum menirukan :'}
           </h2>
           <p className="mt-2 text-sm sm:text-base font-semibold text-slate-600 leading-relaxed">
-            Perhatikan bentuk jari, arah telapak, posisi terhadap tubuh, titik akhir gerakan beserta ekspresi wajah.
+            {mission.type === 'alphabet'
+              ? 'Perhatikan bentuk jari, arah telapak, posisi terhadap tubuh, titik awal dan akhir gerakan.'
+              : 'Perhatikan bentuk jari, arah telapak, posisi terhadap tubuh, titik akhir gerakan beserta ekspresi wajah.'}
           </p>
         </div>
 
@@ -144,7 +155,10 @@ export function MissionVocabularyCarousel({
                 <video
                   src={versionedSignVideo(sign.videoSrc)}
                   aria-label={`Demonstrasi tanda ${sign.label}`}
-                  className="size-full object-cover"
+                  className={cn(
+                    'size-full',
+                    mission.type === 'alphabet' ? 'object-contain' : 'object-cover',
+                  )}
                   controls
                   muted
                   playsInline
