@@ -1,6 +1,7 @@
 'use client';
 
 import { Check, ChevronDown, LockKeyhole, Play, Star } from 'lucide-react';
+import Image from 'next/image';
 import Link from 'next/link';
 
 import {
@@ -100,6 +101,44 @@ const chapterThemes: Record<string, ChapterTheme> = {
   },
 };
 
+const missionArtworkByChapterId: Record<string, string[]> = {
+  'chapter-5': [
+    '/assets/bisara/Misi17.png',
+    '/assets/bisara/Misi18.png',
+    '/assets/bisara/Misi19.png',
+    '/assets/bisara/Misi20.png',
+    '/assets/bisara/Misi21.png',
+  ],
+  'chapter-1': [
+    '/assets/bisara/Misi01.png',
+    '/assets/bisara/Misi02.png',
+    '/assets/bisara/Misi03.png',
+    '/assets/bisara/Misi04.png',
+    '/assets/bisara/TesBab2.png',
+  ],
+  'chapter-2': [
+    '/assets/bisara/Misi05.png',
+    '/assets/bisara/Misi06.png',
+    '/assets/bisara/Misi07.png',
+    '/assets/bisara/Misi08.png',
+    '/assets/bisara/TesBab3.png',
+  ],
+  'chapter-3': [
+    '/assets/bisara/Misi09.png',
+    '/assets/bisara/Misi10.png',
+    '/assets/bisara/Misi11.png',
+    '/assets/bisara/Misi12.png',
+    '/assets/bisara/TesBab4.png',
+  ],
+  'chapter-4': [
+    '/assets/bisara/Misi13.png',
+    '/assets/bisara/Misi14.png',
+    '/assets/bisara/Misi15.png',
+    '/assets/bisara/Misi16.png',
+    '/assets/bisara/TesBab5.png',
+  ],
+};
+
 export function ChapterAccordionCard({
   chapter,
   chapterIndex,
@@ -137,13 +176,13 @@ export function ChapterAccordionCard({
           <div className="max-w-xl flex-1">
             <span
               className={cn(
-                'inline-block px-4 py-1 rounded-full text-xs sm:text-sm font-black text-white tracking-wide shadow-xs',
+                'inline-block px-4 py-1 rounded-full text-xs sm:text-sm font-bold text-white tracking-wide shadow-xs',
                 theme.pillBg,
               )}
             >
               Bab {chapterIndex + 1}
             </span>
-            <h3 className="mt-3 text-2xl sm:text-3xl lg:text-4xl font-black tracking-tight text-slate-900">
+            <h3 className="mt-3 text-2xl sm:text-3xl lg:text-4xl font-bold tracking-tight text-slate-900">
               {chapter.title}
             </h3>
             <p className="mt-1.5 sm:mt-2 text-xs sm:text-sm lg:text-base text-slate-600 font-medium leading-relaxed line-clamp-2">
@@ -193,14 +232,14 @@ export function ChapterAccordionCard({
               />
             </div>
 
-            <span className="text-base sm:text-lg lg:text-xl font-black text-slate-800 shrink-0">
+            <span className="text-base sm:text-lg lg:text-xl font-bold text-slate-800 shrink-0">
               {chapterProgress}%
             </span>
 
             {isUnlocked ? (
               <Link
                 href={startHref}
-                className="inline-flex items-center justify-center gap-2 rounded-full bg-[#FFAE00] px-7 sm:px-8 py-3 text-sm sm:text-base font-black text-slate-950 shadow-sm transition-all hover:bg-[#F2A300] hover:scale-105 active:scale-95 shrink-0 min-w-[120px] sm:min-w-[140px]"
+                className="inline-flex items-center justify-center gap-2 rounded-full bg-[#FFAE00] px-7 sm:px-8 py-3 text-sm sm:text-base font-bold text-slate-950 shadow-sm transition-all hover:bg-[#F2A300] hover:scale-105 active:scale-95 shrink-0 min-w-[120px] sm:min-w-[140px]"
               >
                 <Play className="size-4 sm:size-4.5 fill-slate-950" />
                 <span>Mulai</span>
@@ -216,7 +255,7 @@ export function ChapterAccordionCard({
           <button
             type="button"
             onClick={onToggle}
-            className="group mt-3 inline-flex items-center gap-1.5 text-xs sm:text-sm font-black text-slate-800 hover:text-slate-950 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900"
+            className="group mt-3 inline-flex items-center gap-1.5 text-xs sm:text-sm font-bold text-slate-800 hover:text-slate-950 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900"
             aria-expanded={isExpanded}
             aria-controls={`${chapter.id}-missions`}
           >
@@ -233,11 +272,7 @@ export function ChapterAccordionCard({
         </div>
       </div>
 
-      {/* Stationary Top Illustration */}
-      <div
-        className="pointer-events-none absolute top-0 right-28 sm:right-36 md:right-48 lg:right-56 hidden sm:block opacity-85 lg:opacity-95 z-0"
-        aria-hidden="true"
-      >
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-0 hidden h-[365px] overflow-hidden sm:block" aria-hidden="true">
         <ChapterIllustration type={chapter.id} />
       </div>
 
@@ -294,9 +329,10 @@ export function ChapterAccordionCard({
                             isCheckpoint={mission.type === 'checkpoint'}
                             isLocked={false}
                             alphabetRange={mission.type === 'alphabet' ? mission.title : undefined}
+                            artworkSrc={missionArtworkByChapterId[chapter.id]?.[missionIdx]}
                           />
                         </div>
-                        <span className="rounded-full bg-slate-900/10 px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider text-slate-900 sm:text-[11px]">
+                        <span className="rounded-full bg-slate-900/10 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-slate-900 sm:text-[11px]">
                           {mission.type === 'checkpoint'
                             ? `TES BAB ${chapterIndex + 1}`
                             : `MISI ${mission.number}`}
@@ -313,7 +349,7 @@ export function ChapterAccordionCard({
                         <div className="flex flex-1 items-center justify-center">
                           <LockKeyhole className="size-7 text-slate-700/60 sm:size-8" />
                         </div>
-                        <span className="flex items-center gap-1 rounded-full bg-slate-900/15 px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider text-slate-800 sm:text-[11px]">
+                        <span className="flex items-center gap-1 rounded-full bg-slate-900/15 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-slate-800 sm:text-[11px]">
                           <LockKeyhole className="size-2.5" />
                           {mission.type === 'checkpoint'
                             ? `TES BAB ${chapterIndex + 1}`
@@ -325,7 +361,7 @@ export function ChapterAccordionCard({
                       {mission.title}
                     </p>
                     {isCompleted ? (
-                      <span className="mt-1 inline-flex items-center gap-1 text-[10px] font-black text-emerald-700">
+                      <span className="mt-1 inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700">
                         <Check className="size-3" strokeWidth={3} /> Selesai
                       </span>
                     ) : null}
@@ -345,18 +381,38 @@ function MissionVisualIcon({
   isCheckpoint,
   isLocked,
   alphabetRange,
+  artworkSrc,
 }: {
   index: number;
   isCheckpoint: boolean;
   isLocked: boolean;
   alphabetRange?: string;
+  artworkSrc?: string;
 }) {
   if (isLocked) {
     return <LockKeyhole className="size-7 text-slate-700/60 sm:size-8" />;
   }
 
+  if (artworkSrc) {
+    return (
+      <Image
+        src={artworkSrc}
+        alt=""
+        width={128}
+        height={112}
+        className="h-20 w-24 object-contain sm:h-24 sm:w-28 lg:h-28 lg:w-32"
+        draggable={false}
+        loading="lazy"
+      />
+    );
+  }
+
   if (alphabetRange) {
-    return <span className="text-2xl font-black tracking-tight text-slate-900 sm:text-3xl">{alphabetRange}</span>;
+    return (
+      <span className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
+        {alphabetRange}
+      </span>
+    );
   }
 
   if (isCheckpoint) {
@@ -473,138 +529,48 @@ function MissionVisualIcon({
 }
 
 function ChapterIllustration({ type }: { type: string }) {
-  if (type === 'chapter-5') {
-    return (
-      <svg className="h-40 w-56 sm:h-48 sm:w-64" viewBox="0 0 260 190" aria-hidden="true">
-        <text x="14" y="174" fontFamily="Arial, sans-serif" fontSize="146" fontWeight="900" fill="#F8A07E" stroke="white" strokeWidth="7" paintOrder="stroke" transform="rotate(-8 85 125)">A</text>
-        <text x="115" y="124" fontFamily="Arial, sans-serif" fontSize="146" fontWeight="900" fill="#F9D869" stroke="white" strokeWidth="7" paintOrder="stroke" transform="rotate(9 170 85)">B</text>
-        <text x="134" y="195" fontFamily="Arial, sans-serif" fontSize="128" fontWeight="900" fill="#6BD0DA" stroke="white" strokeWidth="7" paintOrder="stroke" transform="rotate(-8 185 155)">C</text>
-      </svg>
-    );
-  }
-  if (type === 'chapter-1') {
-    // Open hand waving graphic matching user's Figma vector
-    return (
-      <svg
-        className="h-52 w-64 sm:h-60 sm:w-72 lg:h-64 lg:w-80"
-        viewBox="0 0 240 180"
-        fill="none"
-        xmlns="http://www.w3.org/2000/svg"
-      >
-        <path
-          d="M65 180C75 145 92 110 102 78C105 70 106 50 102 30C99 18 112 12 118 24C124 38 125 58 126 72C130 58 137 34 146 14C151 3 162 8 159 20C154 40 148 62 146 76C151 64 163 38 173 24C180 14 190 20 185 32C177 52 168 76 164 88C171 76 184 60 193 48C200 40 209 46 204 56C192 84 173 118 162 136C146 160 128 176 112 180H65Z"
-          fill="#E6C2BA"
-        />
-        <path
-          d="M125 60C128 78 131 98 129 116"
-          stroke="#4A4545"
-          strokeWidth="3.5"
-          strokeLinecap="round"
-        />
-        <path
-          d="M144 86C149 98 156 108 165 115"
-          stroke="#4A4545"
-          strokeWidth="3"
-          strokeLinecap="round"
-        />
-      </svg>
-    );
-  }
+  // The stored chapter IDs predate the current display order. Map them to the
+  // visible Bab number so the supplied Bab1–Bab5 artwork stays in sequence.
+  const illustrationByChapterId: Record<string, string> = {
+    'chapter-5': '/assets/bisara/Bab1.png',
+    'chapter-1': '/assets/bisara/Bab2.png',
+    'chapter-2': '/assets/bisara/Bab3.png',
+    'chapter-3': '/assets/bisara/Bab4.png',
+    'chapter-4': '/assets/bisara/Bab5.png',
+  };
 
-  if (type === 'chapter-2') {
-    // Bottle, glasses and noodle squiggle graphic
-    return (
-      <svg
-        className="h-36 w-48"
-        viewBox="0 0 200 150"
-        fill="none"
-        xmlns="http://www.w3.org/2000/svg"
-      >
-        <path
-          d="M140 10C155 20 160 30 145 45C130 60 140 70 160 75"
-          stroke="#DCA842"
-          strokeWidth="5"
-          strokeLinecap="round"
-        />
-        <rect
-          x="100"
-          y="70"
-          width="24"
-          height="70"
-          rx="4"
-          fill="#E7BA55"
-          fillOpacity="0.5"
-          stroke="#C8972E"
-          strokeWidth="4"
-        />
-        <rect
-          x="135"
-          y="90"
-          width="20"
-          height="50"
-          rx="3"
-          fill="#F5CD6D"
-          fillOpacity="0.6"
-          stroke="#C8972E"
-          strokeWidth="4"
-        />
-      </svg>
-    );
-  }
+  const src = illustrationByChapterId[type];
+  const positionByChapterId: Record<string, string> = {
+    'chapter-5': '-top-20 right-[10%]',
+    'chapter-1': 'top-3 right-[13%]',
+    'chapter-2': '-top-9 right-[12%]',
+    'chapter-3': '-top-14 right-[16%] lg:-top-24',
+    'chapter-4': '-top-10 right-[4%]',
+  };
+  const dimensionsByChapterId: Record<string, [number, number]> = {
+    'chapter-5': [2042, 2433],
+    'chapter-1': [1248, 1612],
+    'chapter-2': [1676, 1950],
+    'chapter-3': [1772, 1708],
+    'chapter-4': [2022, 2432],
+  };
 
-  if (type === 'chapter-3') {
-    // Walking legs graphic
-    return (
-      <svg
-        className="h-36 w-48"
-        viewBox="0 0 200 150"
-        fill="none"
-        xmlns="http://www.w3.org/2000/svg"
-      >
-        <path
-          d="M130 20L110 80L80 130L65 140"
-          stroke="#E68369"
-          strokeWidth="8"
-          strokeLinecap="round"
-        />
-        <path
-          d="M130 20L150 70L175 125L190 130"
-          stroke="#D86B50"
-          strokeWidth="8"
-          strokeLinecap="round"
-        />
-      </svg>
-    );
-  }
+  if (!src) return null;
 
-  // chapter-4: Clock and leaf graphic
   return (
-    <svg
-      className="h-36 w-48"
-      viewBox="0 0 200 150"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <circle
-        cx="130"
-        cy="70"
-        r="40"
-        fill="#FFFFFF"
-        fillOpacity="0.6"
-        stroke="#A5C2FA"
-        strokeWidth="4"
-      />
-      <path
-        d="M130 50V70L145 80"
-        stroke="#7A9FE6"
-        strokeWidth="4"
-        strokeLinecap="round"
-      />
-      <path
-        d="M160 40C180 50 190 70 185 100C170 95 160 85 160 40Z"
-        fill="#C4D8FD"
-        fillOpacity="0.7"
-      />
-    </svg>
+    <Image
+      src={src}
+      alt=""
+      width={dimensionsByChapterId[type][0]}
+      height={dimensionsByChapterId[type][1]}
+      sizes="(min-width: 1024px) 500px, 400px"
+      className={cn(
+        'absolute h-[400px] w-auto max-w-none opacity-50 lg:h-[460px]',
+        type === 'chapter-4' && 'lg:h-[540px]',
+        positionByChapterId[type],
+      )}
+      draggable={false}
+      loading="lazy"
+    />
   );
 }

@@ -7,13 +7,22 @@ import { useSyncExternalStore } from 'react';
 import { useProgress } from '@/hooks/use-progress';
 import {
   allMissions,
+  getChapterForMission,
   getMission,
   getMissionPosition,
 } from '@/lib/learning-data';
-import { getMissionLearningState } from '@/lib/learning-progress';
+import {
+  getMissionActiveStageHref,
+  getMissionLearningState,
+} from '@/lib/learning-progress';
 import { cn } from '@/lib/utils';
 
-export type MissionSection = 'amati' | 'tirukan' | 'recognition' | 'recall';
+export type MissionSection =
+  | 'amati'
+  | 'tirukan'
+  | 'recognition'
+  | 'recall'
+  | 'complete';
 const subscribeHydration = () => () => undefined;
 const clientReady = () => true;
 const serverReady = () => false;
@@ -61,7 +70,7 @@ export function MissionSectionNavigation({
             href:
               mission.type === 'alphabet'
                 ? `/missions/learn?mission=${mission.id}&section=tirukan`
-                : `/missions/practice?mission=${mission.id}&sign=${mission.signIds[0]}`,
+                : `/missions/practice?mission=${mission.id}&sign=${learning.missionSigns.find((s) => !progress.signMastery[s.id]?.passed)?.id ?? mission.signIds[0]}`,
             complete: learning.practiceComplete,
             available: learning.unlocked,
           },
@@ -87,18 +96,26 @@ export function MissionSectionNavigation({
       available: learning.unlocked && learning.recognitionComplete,
     },
   ];
-  const currentIndex = stages.findIndex((stage) => stage.id === section);
+  const isCompleteSection = section === 'complete';
+  const effectiveSection = isCompleteSection ? 'recall' : section;
+  const currentIndex = stages.findIndex(
+    (stage) => stage.id === effectiveSection,
+  );
   if (currentIndex === -1) return null;
   const previous = stages[currentIndex - 1];
-  const following = stages[currentIndex + 1];
+  const following = isCompleteSection ? undefined : stages[currentIndex + 1];
   const nextMission = allMissions[getMissionPosition(mission.id) + 1];
   const next = following
     ? { ...following, label: `Lanjut ke ${following.label}` }
-    : learning.missionComplete
+    : learning.missionComplete || isCompleteSection
       ? {
-          href: nextMission?.href ?? '/review',
+          href: nextMission
+            ? getMissionActiveStageHref(nextMission, progress)
+            : '/review',
           label: nextMission
-            ? `Lanjut ke misi: ${nextMission.title}`
+            ? nextMission.type === 'checkpoint'
+              ? `Mulai Tes Bab ${getChapterForMission(nextMission.id).number.replace(/^0/, '')}`
+              : `Lanjut ke misi: ${nextMission.title}`
             : 'Lanjut ke review',
           available: true,
         }
@@ -110,7 +127,7 @@ export function MissionSectionNavigation({
     return (
       <nav
         aria-label={`Navigasi bagian misi ${mission.title}`}
-        className="fixed bottom-0 inset-x-0 z-40 bg-[#FFFDF7] border-t-2 border-[#FFAE00] shadow-[0_-4px_24px_rgba(0,0,0,0.06)] pb-4 px-2 sm:px-6"
+        className="fixed bottom-0 inset-x-0 z-40 bg-[#FFFDF7] border-t-2 border-[#FFAE00] shadow-[0_-4px_24px_rgba(0,0,0,0.06)] px-1.5 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:px-6 sm:pb-4"
       >
         <div
           className="mx-auto max-w-xl relative grid pt-1"
@@ -128,8 +145,12 @@ export function MissionSectionNavigation({
           />
 
           {stages.map((stage) => {
-            const isCurrent = stage.id === section;
-            const isDone = ready ? !isCurrent && stage.complete : false;
+            const isCurrent = !isCompleteSection && stage.id === section;
+            const isDone = ready
+              ? isCompleteSection || learning.missionComplete
+                ? stage.complete
+                : !isCurrent && stage.complete
+              : false;
             const isAvailable = ready
               ? !isCurrent && !isDone && stage.available
               : false;
@@ -137,7 +158,7 @@ export function MissionSectionNavigation({
             const iconElement = isCurrent ? (
               <Hand className="size-5 text-slate-950" />
             ) : isDone ? (
-              <Check className="size-5 font-black stroke-[3.5] text-slate-950" />
+              <Check className="size-5 font-bold stroke-[3.5] text-slate-950" />
             ) : isAvailable ? (
               <ArrowRight className="size-4 text-slate-950" />
             ) : (
@@ -182,10 +203,10 @@ export function MissionSectionNavigation({
                   {iconElement}
                 </span>
 
-                <span className="mt-2 text-xs font-black text-slate-900 group-hover:text-amber-700 transition-colors whitespace-nowrap">
+                <span className="mt-2 flex min-h-[22px] max-w-full items-center text-[10px] font-bold leading-[1.1] text-slate-900 transition-colors group-hover:text-amber-700 sm:text-xs">
                   {stage.label}
                 </span>
-                <span className="text-[10px] sm:text-[11px] font-semibold text-slate-500 whitespace-nowrap">
+                <span className="max-w-full text-[8px] font-semibold leading-tight text-slate-500 sm:text-[11px]">
                   {subtext}
                 </span>
               </>
@@ -291,7 +312,7 @@ export function MissionSectionNavigation({
           next.available ? (
             <Link
               href={next.href}
-              className="inline-flex min-h-10 items-center gap-2 rounded-full bg-signal-navy px-5 py-2 text-sm font-black text-white hover:bg-signal-navy/90"
+              className="inline-flex min-h-10 items-center gap-2 rounded-full bg-signal-navy px-5 py-2 text-sm font-bold text-white hover:bg-signal-navy/90"
             >
               {next.label} <ArrowRight className="size-4" />
             </Link>

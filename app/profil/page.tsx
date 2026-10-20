@@ -3,125 +3,70 @@
 import {
   Award,
   Bookmark,
-  Ear,
   Flag,
   Flame,
-  LockKeyhole,
+  LoaderCircle,
   LogOut,
-  MessageSquare,
   Star,
-  Trophy,
-  Zap,
 } from 'lucide-react';
+import Image from 'next/image';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { useState } from 'react';
 
 import { AppHeader } from '@/components/app-header';
 import { useAccount } from '@/hooks/use-account';
 import { useProgress } from '@/hooks/use-progress';
 import { logoutAccount } from '@/lib/account-session';
+import { getProfileBadges, triggerBadgeUnlock } from '@/lib/badges';
 import { signs } from '@/lib/curriculum-data';
 import { getPrototypeMissionCount } from '@/lib/learning-progress';
 
 export default function ProfilPage() {
   const account = useAccount();
   const progress = useProgress();
+  const router = useRouter();
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+
+  const handleLogout = async () => {
+    if (isLoggingOut) return;
+    setIsLoggingOut(true);
+    try {
+      await logoutAccount();
+      router.push('/account');
+    } catch (err) {
+      console.error('Logout error:', err);
+    } finally {
+      setIsLoggingOut(false);
+    }
+  };
 
   const completedMissionsCount = getPrototypeMissionCount(progress);
   const masteredSignsCount = signs.filter(
     (sign) => progress.signMastery[sign.id]?.passed,
   ).length;
-  const reviewedSignsCount = progress.reviewedSigns.length;
 
-  const displayName = account.user?.displayName || 'Ahmad Fauzi';
+  const isLoading = account.status === 'loading' && !account.user;
+  const displayName = account.user?.displayName || 'Pengguna Tamu';
   const joinedDate = account.user?.createdAt
     ? new Date(account.user.createdAt).toLocaleDateString('id-ID', {
         month: 'short',
         year: 'numeric',
       })
-    : 'Jan 2025';
+    : null;
+
+  const subtitle = account.user
+    ? `Bergabung sejak ${joinedDate || 'Baru saja'}`
+    : 'Mode Tamu · Belum masuk akun';
 
   const streakDisplay = progress.streak > 0 ? `${progress.streak} hari` : '80 hari';
   const missionsDisplay =
-    completedMissionsCount > 0 ? `${completedMissionsCount} / 15` : '2 / 15';
+    completedMissionsCount > 0 ? `${completedMissionsCount} / 25` : '2 / 25';
   const vocabDisplay =
     masteredSignsCount > 0 ? `${masteredSignsCount} / 32` : '12 / 32';
-  const starsDisplay = '80 hari';
+  const starsDisplay = '20';
 
-  const badges = [
-    {
-      id: 'penyapa-handal-1',
-      title: 'Penyapa Handal',
-      subtitle: 'Kuasai kosa kata Bab 1',
-      icon: Trophy,
-      unlocked: true,
-      progress: 'Progres: 5/5',
-    },
-    {
-      id: 'penyapa-handal-2',
-      title: 'Penyapa Handal',
-      subtitle: 'Kuasai kosa kata Bab 1',
-      icon: Trophy,
-      unlocked: true,
-      progress: 'Progres: 5/5',
-    },
-    {
-      id: 'komunikator',
-      title: 'Komunikator',
-      subtitle:
-        progress.conversationCompletions > 0
-          ? 'Percakapan selesai'
-          : 'Progres: 0/1',
-      icon: MessageSquare,
-      unlocked: progress.conversationCompletions > 0,
-      progress: `Progres: ${progress.conversationCompletions}/1`,
-    },
-    {
-      id: 'pahlawan-streak-1',
-      title: 'Pahlawan Streak',
-      subtitle:
-        progress.streak >= 7
-          ? '7 hari beruntun'
-          : `Progres: ${Math.min(progress.streak, 7)}/7`,
-      icon: Zap,
-      unlocked: progress.streak >= 7,
-      progress: `Progres: ${Math.min(progress.streak, 7)}/7`,
-    },
-    {
-      id: 'penyapa-handal-3',
-      title: 'Penyapa Handal',
-      subtitle: 'Kuasai kosa kata Bab 1',
-      icon: Trophy,
-      unlocked: true,
-      progress: 'Progres: 5/5',
-    },
-    {
-      id: 'penyimak-teliti-1',
-      title: 'Penyimak Teliti',
-      subtitle: `Progres: ${Math.min(reviewedSignsCount, 5) || 2}/5`,
-      icon: Ear,
-      unlocked: reviewedSignsCount >= 5,
-      progress: `Progres: ${Math.min(reviewedSignsCount, 5) || 2}/5`,
-    },
-    {
-      id: 'pahlawan-streak-2',
-      title: 'Pahlawan Streak',
-      subtitle:
-        progress.streak >= 7
-          ? '7 hari beruntun'
-          : `Progres: ${Math.min(progress.streak, 7)}/7`,
-      icon: Zap,
-      unlocked: progress.streak >= 7,
-      progress: `Progres: ${Math.min(progress.streak, 7)}/7`,
-    },
-    {
-      id: 'penyimak-teliti-2',
-      title: 'Penyimak Teliti',
-      subtitle: `Progres: ${Math.min(reviewedSignsCount, 5) || 2}/5`,
-      icon: Ear,
-      unlocked: reviewedSignsCount >= 5,
-      progress: `Progres: ${Math.min(reviewedSignsCount, 5) || 2}/5`,
-    },
-  ];
+  const badges = getProfileBadges(progress);
 
   return (
     <main className="min-h-screen bg-[#FFE8A3]">
@@ -155,39 +100,54 @@ export default function ProfilPage() {
 
           {/* User Info */}
           <div className="pt-3 pb-8 sm:pb-10 px-4 text-center">
-            <h1 className="text-2xl sm:text-3xl lg:text-4xl font-black text-slate-900 tracking-tight">
-              {displayName}
-            </h1>
-            <p className="mt-1 text-xs sm:text-sm font-semibold text-slate-500">
-              Bergabung sejak {joinedDate}
-            </p>
-
-            {account.user ? (
-              <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3.5 py-1 text-xs font-bold text-emerald-700 border border-emerald-200">
-                  <span className="size-2 rounded-full bg-emerald-500" />
-                  {account.user.email}
-                </span>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    await logoutAccount();
-                  }}
-                  className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3.5 py-1 text-xs font-bold text-slate-700 hover:bg-slate-50 hover:text-slate-900 transition-colors shadow-2xs cursor-pointer"
-                >
-                  <LogOut className="size-3.5 text-slate-500" />
-                  Keluar dari Akun
-                </button>
+            {isLoading ? (
+              <div className="flex flex-col items-center justify-center animate-pulse pt-1">
+                <div className="h-8 sm:h-9 w-48 sm:w-64 rounded-full bg-slate-200" />
+                <div className="mt-2 h-4 w-36 sm:w-44 rounded-full bg-slate-100" />
+                <div className="mt-4 h-7 w-28 rounded-full bg-slate-200" />
               </div>
             ) : (
-              <div className="mt-4 flex items-center justify-center">
-                <Link
-                  href="/account"
-                  className="inline-flex items-center gap-1.5 rounded-full bg-[#F8A51D] px-4 py-1.5 text-xs font-black text-slate-900 shadow-2xs hover:bg-[#E59312] transition-colors"
-                >
-                  Masuk ke Akun
-                </Link>
-              </div>
+              <>
+                <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold text-slate-900 tracking-tight">
+                  {displayName}
+                </h1>
+                <p className="mt-1 text-xs sm:text-sm font-semibold text-slate-500">
+                  {subtitle}
+                </p>
+
+                {account.user ? (
+                  <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3.5 py-1 text-xs font-bold text-emerald-700 border border-emerald-200">
+                      <span className="size-2 rounded-full bg-emerald-500" />
+                      {account.user.email}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void handleLogout();
+                      }}
+                      disabled={isLoggingOut}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3.5 py-1 text-xs font-bold text-slate-700 hover:bg-slate-50 hover:text-slate-900 transition-colors shadow-2xs cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                      {isLoggingOut ? (
+                        <LoaderCircle className="size-3.5 text-slate-500 animate-spin" />
+                      ) : (
+                        <LogOut className="size-3.5 text-slate-500" />
+                      )}
+                      {isLoggingOut ? 'Mengeluarkan...' : 'Keluar dari Akun'}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="mt-4 flex items-center justify-center">
+                    <Link
+                      href="/account"
+                      className="inline-flex items-center gap-1.5 rounded-full bg-[#F8A51D] px-4 py-1.5 text-xs font-bold text-slate-900 shadow-2xs hover:bg-[#E59312] transition-colors"
+                    >
+                      Masuk ke Akun
+                    </Link>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </section>
@@ -203,7 +163,7 @@ export default function ProfilPage() {
               <span className="block text-xs sm:text-sm font-bold text-slate-500">
                 Streak
               </span>
-              <span className="text-xl sm:text-2xl lg:text-3xl font-black text-slate-900 tracking-tight">
+              <span className="text-xl sm:text-2xl lg:text-3xl font-bold text-slate-900 tracking-tight">
                 {streakDisplay}
               </span>
             </div>
@@ -218,7 +178,7 @@ export default function ProfilPage() {
               <span className="block text-xs sm:text-sm font-bold text-slate-500">
                 Misi selesai
               </span>
-              <span className="text-xl sm:text-2xl lg:text-3xl font-black text-slate-900 tracking-tight">
+              <span className="text-xl sm:text-2xl lg:text-3xl font-bold text-slate-900 tracking-tight">
                 {missionsDisplay}
               </span>
             </div>
@@ -233,7 +193,7 @@ export default function ProfilPage() {
               <span className="block text-xs sm:text-sm font-bold text-slate-500">
                 Kosa kata
               </span>
-              <span className="text-xl sm:text-2xl lg:text-3xl font-black text-slate-900 tracking-tight">
+              <span className="text-xl sm:text-2xl lg:text-3xl font-bold text-slate-900 tracking-tight">
                 {vocabDisplay}
               </span>
             </div>
@@ -248,7 +208,7 @@ export default function ProfilPage() {
               <span className="block text-xs sm:text-sm font-bold text-slate-500">
                 Total bintang
               </span>
-              <span className="text-xl sm:text-2xl lg:text-3xl font-black text-slate-900 tracking-tight">
+              <span className="text-xl sm:text-2xl lg:text-3xl font-bold text-slate-900 tracking-tight">
                 {starsDisplay}
               </span>
             </div>
@@ -256,64 +216,64 @@ export default function ProfilPage() {
         </section>
 
         {/* Card 3: Koleksi Lencana (Achievements / Badges) */}
-        <section className="rounded-[2.5rem] sm:rounded-[3rem] bg-white p-6 sm:p-8 lg:p-12 shadow-sm border border-amber-200/30">
+        <section className="rounded-[2.5rem] sm:rounded-[3rem] bg-[#FFFDF0] p-6 sm:p-8 lg:p-12 shadow-sm border-2 border-[#FFAE00]">
           <div className="flex items-center justify-between">
             <div>
-              <span className="text-xs sm:text-sm font-black uppercase tracking-widest text-[#F06543]">
+              <span className="text-xs sm:text-sm font-bold uppercase tracking-widest text-[#F06543]">
                 Koleksi Lencana
               </span>
-              <h2 className="mt-1 text-xl sm:text-2xl lg:text-3xl font-black text-slate-900 tracking-tight">
+              <h2 className="mt-1 text-xl sm:text-2xl lg:text-3xl font-bold text-slate-900 tracking-tight">
                 Pencapaian yang sudah kamu buka
               </h2>
             </div>
-            <Award className="size-6 sm:size-7 text-[#FFAE00]" strokeWidth={2.2} />
+            <Award className="size-6 sm:size-7 text-[#FFAE00]" strokeWidth={2.5} />
           </div>
 
           {/* 8 Badges Grid (4 columns x 2 rows) */}
           <div className="mt-8 sm:mt-12 grid grid-cols-2 gap-x-4 gap-y-8 sm:grid-cols-4 sm:gap-x-8 sm:gap-y-10">
-            {badges.map((badge) => {
-              const Icon = badge.icon;
-              return (
-                <div
-                  key={badge.id}
-                  className="flex flex-col items-center text-center"
-                >
-                  {badge.unlocked ? (
-                    <div className="flex size-20 sm:size-24 items-center justify-center rounded-full border-2 border-[#FCD561] bg-[#FFF9E6] shadow-xs">
-                      <Icon
-                        className="size-9 sm:size-11 text-[#F8A51D]"
-                        strokeWidth={2}
-                      />
-                    </div>
-                  ) : (
-                    <div className="relative flex size-20 sm:size-24 items-center justify-center rounded-full border-2 border-slate-200 bg-[#F8FAFC] shadow-xs">
-                      <Icon
-                        className="size-8 sm:size-10 text-slate-400"
-                        strokeWidth={1.8}
-                      />
-                      <div className="absolute -bottom-1 -right-1 flex size-6 sm:size-6.5 items-center justify-center rounded-full border border-slate-200 bg-white shadow-2xs">
-                        <LockKeyhole className="size-3 sm:size-3.5 text-slate-500" />
-                      </div>
-                    </div>
-                  )}
-
-                  <h3
-                    className={`mt-3 sm:mt-3.5 text-xs sm:text-sm font-black ${
-                      badge.unlocked ? 'text-slate-900' : 'text-slate-700'
+            {badges.map((badge, index) => (
+              <button
+                key={badge.id}
+                type="button"
+                onClick={() => triggerBadgeUnlock(badge)}
+                title={
+                  badge.unlocked
+                    ? `Klik untuk melihat lencana ${badge.title}`
+                    : `Klik untuk melihat syarat ${badge.title}`
+                }
+                className="group flex flex-col items-center text-center cursor-pointer transition-transform duration-200 hover:-translate-y-1 focus:outline-none"
+              >
+                <div className="relative flex size-20 sm:size-24 md:size-28 items-center justify-center">
+                  <Image
+                    src={badge.image}
+                    alt={badge.title}
+                    width={112}
+                    height={112}
+                    priority={index < 4}
+                    className={`size-full object-contain select-none transition-all duration-200 group-hover:scale-105 ${
+                      badge.unlocked
+                        ? 'drop-shadow-xs'
+                        : 'grayscale opacity-60'
                     }`}
-                  >
-                    {badge.title}
-                  </h3>
-                  <p
-                    className={`mt-0.5 text-[11px] sm:text-xs font-semibold ${
-                      badge.unlocked ? 'text-slate-500' : 'text-slate-400'
-                    }`}
-                  >
-                    {badge.subtitle}
-                  </p>
+                  />
                 </div>
-              );
-            })}
+
+                <h3
+                  className={`mt-3 sm:mt-3.5 text-xs sm:text-sm font-bold ${
+                    badge.unlocked ? 'text-slate-900 group-hover:text-amber-600' : 'text-slate-400'
+                  }`}
+                >
+                  {badge.title}
+                </h3>
+                <p
+                  className={`mt-0.5 text-[11px] sm:text-xs font-semibold max-w-[140px] leading-tight ${
+                    badge.unlocked ? 'text-slate-500' : 'text-slate-400'
+                  }`}
+                >
+                  {badge.subtitle}
+                </p>
+              </button>
+            ))}
           </div>
         </section>
       </div>

@@ -1,5 +1,5 @@
 import { isAlphabetPracticeCompleted } from '@/lib/alphabet-data';
-import { getSigns } from '@/lib/curriculum-data';
+import { getSigns, type SignId } from '@/lib/curriculum-data';
 import { isCurriculumDebugUnlocked } from '@/lib/debug-unlock';
 import {
   allMissions,
@@ -13,6 +13,7 @@ import {
   hasPassedProductionTest,
   type UserProgress,
 } from '@/lib/progress-storage';
+import { getProfileBadges } from '@/lib/badges';
 
 export const RECOGNITION_PASS_SCORE = 70;
 export type LearningStageState = 'completed' | 'current' | 'locked';
@@ -36,14 +37,13 @@ export function getMissionLearningState(
   if (mission.type === 'alphabet') {
     const missionComplete = progress.completedMissionIds.includes(mission.id);
     const unlocked = isMissionUnlocked(mission.id, progress);
+    const practiceComplete =
+      missionComplete || isAlphabetPracticeCompleted(mission.id);
+    const practiceStarted = practiceComplete;
     const recognitionScore = progress.missionScores[mission.id] ?? 0;
     const recognitionComplete =
-      missionComplete || recognitionScore >= RECOGNITION_PASS_SCORE;
-    const practiceComplete =
-      missionComplete ||
-      recognitionComplete ||
-      isAlphabetPracticeCompleted(mission.id);
-    const practiceStarted = practiceComplete;
+      practiceComplete &&
+      (missionComplete || recognitionScore >= RECOGNITION_PASS_SCORE);
     const letterCount = mission.alphabetLetters?.length ?? 5;
     const progressPercent = missionComplete
       ? 100
@@ -69,8 +69,8 @@ export function getMissionLearningState(
         };
       } else {
         next = {
-          href: mission.href,
-          label: `Mulai tahap Amati`,
+          href: `/missions/learn?mission=${mission.id}&section=tirukan`,
+          label: 'Mulai tahap Tirukan',
         };
       }
     }
@@ -146,14 +146,17 @@ export function getMissionLearningState(
       : !recognitionComplete
         ? {
             href: `/missions/test?${missionQuery}&mode=recognition`,
-            label: 'Mulai uji pengenalan',
+            label:
+              mission.type === 'checkpoint'
+                ? 'Mulai Tes Bab'
+                : 'Mulai uji pengenalan',
           }
-        : !missionComplete
-          ? {
+        : mission.type === 'checkpoint' || missionComplete
+          ? getNextMissionAction(mission.id)
+          : {
               href: `/missions/test?${missionQuery}&mode=recall`,
               label: 'Lanjut ke Uji peragaan',
-            }
-          : getNextMissionAction(mission.id);
+            };
 
   return {
     mission,
@@ -231,9 +234,7 @@ export function getMissionActiveStageHref(
   }
 
   if (mission.type === 'checkpoint') {
-    return learning.recognitionComplete
-      ? `/missions/test?mission=${mission.id}&mode=recall`
-      : `/missions/test?mission=${mission.id}&mode=recognition`;
+    return `/missions/test?mission=${mission.id}&mode=recognition`;
   }
 
   if (!learning.practiceStarted) {
@@ -263,13 +264,7 @@ export function getPrototypeMissionCount(progress: UserProgress) {
 }
 
 export function getBadgeCount(progress: UserProgress): number {
-  const completedMissions = getPrototypeMissionCount(progress);
-  return [
-    completedMissions > 0,
-    progress.streak >= 7,
-    progress.bestChapterScore >= 70,
-    Object.values(progress.signMastery).some((item) => item.recall),
-  ].filter(Boolean).length;
+  return getProfileBadges(progress).filter((badge) => badge.unlocked).length;
 }
 
 export function getChapterProgress(chapterId: string, progress: UserProgress) {
@@ -282,7 +277,7 @@ export function getChapterProgress(chapterId: string, progress: UserProgress) {
 }
 
 export function getChapterOneProgress(progress: UserProgress) {
-  return getChapterProgress('chapter-1', progress);
+  return getChapterProgress(chapters[0].id, progress);
 }
 
 export function getCurrentMission(progress: UserProgress) {
@@ -292,3 +287,51 @@ export function getCurrentMission(progress: UserProgress) {
     ) ?? allMissions.at(-1)!
   );
 }
+
+/**
+ * Checks whether a specific sign in a mission's camera practice is unlocked.
+ * A sign is unlocked if:
+ * 1. Curriculum debug is active, OR
+ * 2. The mission is already completed (allowing free review), OR
+ * 3. It is the first sign of the mission (index 0), OR
+ * 4. ALL signs preceding it in the mission have been passed (signMastery[id].passed === true).
+ */
+export function isMissionSignUnlocked(
+  signId: string,
+  missionSignIds: string[],
+  progress: UserProgress,
+  missionId?: string,
+): boolean {
+  if (isCurriculumDebugUnlocked()) return true;
+  if (missionId && progress.completedMissionIds.includes(missionId)) return true;
+
+  const signIndex = missionSignIds.indexOf(signId);
+  if (signIndex <= 0) return true;
+
+  for (let i = 0; i < signIndex; i++) {
+    const prevId = missionSignIds[i];
+    if (!progress.signMastery[prevId as SignId]?.passed) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/**
+ * Checks whether all signs in a mission have been passed, enabling the final
+ * practice / assessment stage ("Latihan").
+ */
+export function isMissionPracticeComplete(
+  missionSignIds: string[],
+  progress: UserProgress,
+  missionId?: string,
+): boolean {
+  if (isCurriculumDebugUnlocked()) return true;
+  if (missionId && progress.completedMissionIds.includes(missionId)) return true;
+
+  return missionSignIds.every(
+    (id) => Boolean(progress.signMastery[id as SignId]?.passed),
+  );
+}
+

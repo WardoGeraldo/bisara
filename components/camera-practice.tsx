@@ -8,6 +8,7 @@ import {
   Check,
   Hand,
   LoaderCircle,
+  LockKeyhole,
   Play,
   RefreshCw,
   RotateCcw,
@@ -39,7 +40,11 @@ import {
   type GestureScore,
   type HandObservation,
 } from '@/lib/gesture-scoring';
-import { getMissionLearningState } from '@/lib/learning-progress';
+import { drawHandLandmarkOverlay } from '@/lib/landmark-overlay';
+import {
+  getMissionLearningState,
+  isMissionSignUnlocked,
+} from '@/lib/learning-progress';
 import { recordGestureAssessment } from '@/lib/progress-storage';
 import {
   getBodyAnchoredReferenceFrames,
@@ -79,6 +84,7 @@ const MAX_RECORDING_DURATION_MS = 10000;
 const REFERENCE_SAMPLE_INTERVAL_MS = 66;
 const POSE_INFERENCE_INTERVAL_MS = 132;
 const MAX_POSE_AGE_MS = 300;
+const START_HAND_STABILITY_MS = 300;
 
 const HAND_CONNECTIONS: Array<[number, number]> = [
   [0, 1],
@@ -173,10 +179,12 @@ export function CameraPractice({
   const lastPoseInferenceRef = useRef(0);
   const poseTimestampOffsetRef = useRef(0);
   const latestPoseAtRef = useRef(0);
+  const stableHandsSinceRef = useRef(0);
   const latestPoseLandmarksRef =
     useRef<GestureFrame['poseLandmarks']>(undefined);
   const lastBrightnessCheckRef = useRef(0);
   const mountedRef = useRef(true);
+  const mobileControlsRef = useRef<HTMLDivElement>(null);
 
   // Scoring refs
   const referenceFramesRef = useRef<GestureFrame[]>([]);
@@ -208,6 +216,7 @@ export function CameraPractice({
   // Scoring state
   const [practicePhase, setPracticePhase] = useState<PracticePhase>('idle');
   const [countdown, setCountdown] = useState(0);
+  const [waitingForHands, setWaitingForHands] = useState(false);
   const [recordingProgress, setRecordingProgress] = useState(0);
   const [recordingDuration, setRecordingDuration] = useState(
     FALLBACK_RECORDING_DURATION_MS,
@@ -270,6 +279,7 @@ export function CameraPractice({
     poseLandmarkerRef.current = null;
     latestPoseLandmarksRef.current = undefined;
     latestPoseAtRef.current = 0;
+    stableHandsSinceRef.current = 0;
     poseTimestampOffsetRef.current = 0;
 
     if (videoRef.current) {
@@ -296,6 +306,7 @@ export function CameraPractice({
     setRecordingProgress(0);
     resumeReferencePreview();
     setCountdown(0);
+    setWaitingForHands(false);
   }, [releaseResources, resumeReferencePreview, updatePhase]);
 
   useEffect(() => {
@@ -330,6 +341,7 @@ export function CameraPractice({
     smoothedHandsRef.current = [];
     latestPoseLandmarksRef.current = undefined;
     latestPoseAtRef.current = 0;
+    stableHandsSinceRef.current = 0;
 
     setCountdown(0);
     setRecordingProgress(0);
@@ -549,10 +561,17 @@ export function CameraPractice({
             }
             const overlay = canvasRef.current;
             if (overlay) {
-              drawHandLandmarks(overlay, currentVideo, hands);
+              // Keep the overlay attached to the newest camera frame. Scoring
+              // continues to use the existing raw/smoothed selection below.
+              drawHandLandmarks(overlay, currentVideo, rawHands);
             }
 
             const detectedHands = hands.length;
+            if (detectedHands >= requiredHandCountRef.current) {
+              if (!stableHandsSinceRef.current) stableHandsSinceRef.current = now;
+            } else {
+              stableHandsSinceRef.current = 0;
+            }
             setHandCount((previous) =>
               previous === detectedHands ? previous : detectedHands,
             );
@@ -775,6 +794,7 @@ export function CameraPractice({
     if (practicePhaseRef.current !== 'countdown') return;
     countdownTimerRef.current = null;
     setCountdown(0);
+    setWaitingForHands(false);
 
     const referenceVideo = getReferenceVideo();
     if (referenceVideo) {
@@ -808,6 +828,7 @@ export function CameraPractice({
     smoothedHandsRef.current = [];
     latestPoseLandmarksRef.current = undefined;
     latestPoseAtRef.current = 0;
+    stableHandsSinceRef.current = 0;
     setRecordingProgress(0);
     setGestureScore(null);
     setNextAction(null);
@@ -830,14 +851,34 @@ export function CameraPractice({
 
     updatePhase('countdown');
     setCountdown(COUNTDOWN_SECONDS);
+    setWaitingForHands(false);
 
-    // Derive the visible number from a monotonic deadline so delayed timers do
-    // not stretch a three-second countdown into four or five seconds.
-    const deadline = performance.now() + COUNTDOWN_SECONDS * 1000;
+    // Keep the countdown tied to a monotonic clock. A cold tracker or hands
+    // outside the frame pauses the start until detection is stable, then gives
+    // one more second to prepare before recording begins.
+    let deadline = performance.now() + COUNTDOWN_SECONDS * 1000;
+    let waitingForReadyHands = false;
     countdownTimerRef.current = setInterval(() => {
       if (practicePhaseRef.current !== 'countdown') return;
-      const remainingMs = deadline - performance.now();
+      const now = performance.now();
+      const remainingMs = deadline - now;
       if (remainingMs <= 0) {
+        if (
+          !stableHandsSinceRef.current ||
+          now - stableHandsSinceRef.current < START_HAND_STABILITY_MS
+        ) {
+          waitingForReadyHands = true;
+          setWaitingForHands(true);
+          setCountdown(1);
+          return;
+        }
+        if (waitingForReadyHands) {
+          waitingForReadyHands = false;
+          setWaitingForHands(false);
+          deadline = now + 1000;
+          setCountdown(1);
+          return;
+        }
         if (countdownTimerRef.current !== null) {
           clearInterval(countdownTimerRef.current);
           countdownTimerRef.current = null;
@@ -860,6 +901,7 @@ export function CameraPractice({
     rawFrameBufferRef.current = [];
     smoothedFrameBufferRef.current = [];
     setRecordingProgress(0);
+    setWaitingForHands(false);
     setGestureScore(null);
     setNextAction(null);
     updatePhase('idle');
@@ -889,6 +931,7 @@ export function CameraPractice({
     }
     frameBufferRef.current = [];
     setCountdown(0);
+    setWaitingForHands(false);
     setRecordingProgress(0);
     setGestureScore(null);
     setNextAction(null);
@@ -910,6 +953,19 @@ export function CameraPractice({
   const practiceComplete = missionSignIds.every(
     (id) => userProgress.signMastery[id].passed,
   );
+
+  useEffect(() => {
+    if (!isReady || window.matchMedia('(min-width: 640px)').matches) return;
+    const frame = requestAnimationFrame(() => {
+      mobileControlsRef.current?.scrollIntoView({
+        behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
+          ? 'auto'
+          : 'smooth',
+        block: 'center',
+      });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [isReady]);
 
   const calibrationChecks = [
     {
@@ -948,7 +1004,7 @@ export function CameraPractice({
           <span className="mx-auto grid size-16 place-items-center rounded-full bg-signal-yellow/30 text-amber-800">
             <Hand className="size-7" />
           </span>
-          <h2 className="mt-6 text-3xl font-black tracking-[-0.04em] text-signal-navy">
+          <h2 className="mt-6 text-3xl font-bold tracking-[-0.04em] text-signal-navy">
             Misi ini belum terbuka
           </h2>
           <p className="mt-3 text-sm leading-6 text-muted-foreground">
@@ -959,7 +1015,7 @@ export function CameraPractice({
             href="/"
             className={cn(
               buttonVariants({ size: 'lg' }),
-              'mt-7 rounded-full bg-signal-navy px-6 font-extrabold text-white',
+              'mt-7 rounded-full bg-signal-navy px-6 font-bold text-white',
             )}
           >
             Kembali ke beranda <ArrowRight className="size-4" />
@@ -969,10 +1025,45 @@ export function CameraPractice({
     );
   }
 
+  const isSignUnlocked = isMissionSignUnlocked(
+    signId,
+    missionSignIds,
+    userProgress,
+    missionId,
+  );
+  if (!reviewMode && !productionMode && !isSignUnlocked) {
+    const missionSigns = getSigns(missionSignIds);
+    const firstUnpassed =
+      missionSigns.find((s) => !userProgress.signMastery[s.id]?.passed) ??
+      missionSigns[0];
+
+    return (
+      <section className="grid min-h-[430px] place-items-center rounded-[2.5rem] border border-amber-200/50 bg-white p-8 text-center shadow-xs">
+        <div className="max-w-md">
+          <span className="mx-auto grid size-16 place-items-center rounded-full bg-amber-100 text-amber-700 shadow-2xs">
+            <LockKeyhole className="size-7" />
+          </span>
+          <h2 className="mt-6 text-2xl sm:text-3xl font-bold tracking-tight text-slate-900">
+            Kosakata masih terkunci
+          </h2>
+          <p className="mt-3 text-sm font-semibold leading-relaxed text-slate-600">
+            Selesaikan kosakata “{firstUnpassed.label}” terlebih dahulu sebelum melanjutkan ke kosakata berikutnya.
+          </p>
+          <Link
+            href={`/missions/practice?mission=${missionId}&sign=${firstUnpassed.id}`}
+            className="mt-6 inline-flex items-center gap-2 rounded-full bg-[#FFAE00] px-7 py-3 text-sm font-bold text-slate-950 shadow-xs transition-all hover:bg-[#ff9f00] hover:scale-105 active:scale-95"
+          >
+            Latih kosakata {firstUnpassed.label} <ArrowRight className="size-4" />
+          </Link>
+        </div>
+      </section>
+    );
+  }
+
   return (
     <div
       className={cn(
-        'grid items-stretch gap-5',
+        'grid items-start gap-5',
         exampleCard
           ? 'grid-cols-1 lg:grid-cols-[280px_1fr_280px] xl:grid-cols-[300px_1fr_300px]'
           : 'grid-cols-1 lg:grid-cols-[minmax(0,1.3fr)_minmax(280px,0.7fr)] xl:grid-cols-[minmax(0,1.4fr)_minmax(320px,0.6fr)]',
@@ -980,69 +1071,82 @@ export function CameraPractice({
     >
       {exampleCard}
 
-      <section className="flex flex-col justify-between overflow-hidden rounded-[2rem] bg-[#0B0F19] border border-amber-200/50 shadow-sm">
-        <div className="relative aspect-video bg-[#0B0F19] sm:min-h-[360px]">
-          <video
-            ref={videoRef}
-            className={cn(
-              'absolute inset-0 size-full -scale-x-100 object-cover transition-opacity',
-              isReady ||
-                status === 'loading-model' ||
-                status === 'loading-reference'
-                ? 'opacity-100'
-                : 'opacity-0',
+      <section className="min-w-0 flex flex-col justify-between rounded-[2rem] bg-white p-4 sm:p-7 shadow-xs border border-amber-200/50">
+        <div>
+          <div className="mb-4 flex items-center justify-between">
+            <span className="text-xs font-bold uppercase tracking-wider text-[#E54D2E] block">
+              {productionMode ? 'KAMERA PERAGAAN' : 'KAMERA LATIHAN'}
+            </span>
+            {isReady && (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-0.5 text-[11px] font-bold text-emerald-700 border border-emerald-200">
+                <span className="size-2 rounded-full bg-emerald-500 animate-pulse" />
+                Kamera Aktif
+              </span>
             )}
-            autoPlay
-            muted
-            playsInline
-          />
-          <canvas
-            ref={canvasRef}
-            className="pointer-events-none absolute inset-0 size-full -scale-x-100"
-            aria-hidden="true"
-          />
+          </div>
 
-          <div
-            className="pointer-events-none absolute inset-[10%] rounded-[45%] border border-dashed border-white/25"
-            aria-hidden="true"
-          />
+          <div className="relative min-h-[360px] overflow-hidden rounded-2xl bg-slate-950 shadow-inner sm:aspect-video">
+            <video
+              ref={videoRef}
+              className={cn(
+                'absolute inset-0 size-full -scale-x-100 object-cover transition-opacity',
+                isReady ||
+                  status === 'loading-model' ||
+                  status === 'loading-reference'
+                  ? 'opacity-100'
+                  : 'opacity-0',
+              )}
+              autoPlay
+              muted
+              playsInline
+            />
+            <canvas
+              ref={canvasRef}
+              className="pointer-events-none absolute inset-0 size-full -scale-x-100"
+              aria-hidden="true"
+            />
 
-          {showSetup && (
-            <div className="absolute inset-0 grid place-items-center p-6 text-center">
-              <div className="max-w-md">
-                <span className="mx-auto grid size-16 sm:size-20 place-items-center rounded-full border border-white/10 bg-white/5 text-white">
-                  {status === 'denied' || status === 'unavailable' ? (
-                     <CameraOff className="size-8" />
-                  ) : (
-                    <Camera className="size-8" />
-                  )}
-                </span>
-                <h2 className="mt-5 text-2xl sm:text-3xl font-black text-white">
-                  Siapkan kamera latihan
-                </h2>
-                <p className="mt-2 text-xs sm:text-sm leading-relaxed text-white/60">
-                  Video diproses langsung di browser. BISARA tidak merekam atau
-                  menyimpan video latihan ini.
-                </p>
-                <Button
-                  type="button"
-                  size="lg"
-                  onClick={startCamera}
-                  disabled={isBusy}
-                  className="mt-6 h-12 rounded-full bg-[#00D5D1] px-7 font-black text-slate-950 hover:bg-[#00BDCD] transition-all hover:scale-105 active:scale-95 shadow-sm"
-                >
-                  {isBusy ? (
-                    <LoaderCircle className="size-4 animate-spin" />
-                  ) : (
-                    <Camera className="size-4" />
-                  )}
-                  {status === 'requesting' && 'Menunggu izin kamera'}
-                  {status === 'loading-model' && 'Memuat deteksi tangan'}
-                  {!isBusy && 'Aktifkan kamera'}
-                </Button>
+            <div
+              className="pointer-events-none absolute inset-[10%] rounded-[45%] border border-dashed border-white/25"
+              aria-hidden="true"
+            />
+
+            {showSetup && (
+              <div className="absolute inset-0 grid place-items-center p-4 text-center sm:p-6">
+                <div className="w-full max-w-md">
+                  <span className="mx-auto grid size-14 place-items-center rounded-full border border-white/10 bg-white/5 text-white sm:size-20">
+                    {status === 'denied' || status === 'unavailable' ? (
+                       <CameraOff className="size-8" />
+                    ) : (
+                      <Camera className="size-8" />
+                    )}
+                  </span>
+                  <h2 className="mt-3 text-xl font-bold text-white sm:mt-5 sm:text-3xl">
+                    Siapkan kamera latihan
+                  </h2>
+                  <p className="mt-2 text-xs sm:text-sm leading-relaxed text-white/60">
+                    Video diproses langsung di browser. BISARA tidak merekam atau
+                    menyimpan video latihan ini.
+                  </p>
+                  <Button
+                    type="button"
+                    size="lg"
+                    onClick={startCamera}
+                    disabled={isBusy}
+                    className="mt-4 h-12 w-full max-w-[220px] rounded-full bg-[#F8A51D] px-5 font-bold text-slate-950 hover:bg-[#E59312] transition-all hover:scale-105 active:scale-95 shadow-sm cursor-pointer sm:mt-6 sm:w-auto sm:px-7"
+                  >
+                    {isBusy ? (
+                      <LoaderCircle className="size-4 animate-spin" />
+                    ) : (
+                      <Camera className="size-4" />
+                    )}
+                    {status === 'requesting' && 'Menunggu izin kamera'}
+                    {status === 'loading-model' && 'Memuat deteksi tangan'}
+                    {!isBusy && 'Aktifkan kamera'}
+                  </Button>
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
           {status === 'loading-model' && (
             <div className="absolute inset-0 grid place-items-center bg-signal-navy/55 p-6 text-center backdrop-blur-sm">
@@ -1072,7 +1176,7 @@ export function CameraPractice({
               <div className="absolute inset-x-3 top-3 flex items-start sm:inset-x-4 sm:top-4">
                 <span
                   className={cn(
-                    'max-w-full whitespace-normal break-words rounded-full px-3 py-2 text-center text-xs font-extrabold leading-4 backdrop-blur-sm',
+                    'max-w-full whitespace-normal break-words rounded-full px-3 py-2 text-center text-xs font-bold leading-4 backdrop-blur-sm',
                     handCount > 0
                       ? 'bg-signal-teal text-signal-navy'
                       : 'bg-black/45 text-white',
@@ -1091,11 +1195,15 @@ export function CameraPractice({
           {practicePhase === 'countdown' && (
             <div className="absolute inset-0 grid place-items-center bg-signal-navy/40 backdrop-blur-sm">
               <output className="text-center" aria-live="polite">
-                <span className="mx-auto grid size-24 place-items-center rounded-full bg-signal-yellow text-5xl font-black text-signal-navy">
-                  {countdown}
+                <span className="mx-auto grid size-24 place-items-center rounded-full bg-signal-yellow text-5xl font-bold text-signal-navy">
+                  {waitingForHands ? <Hand className="size-10" /> : countdown}
                 </span>
                 <p className="mt-4 text-sm font-bold text-white">
-                  {signId === 'teman'
+                  {waitingForHands
+                    ? requiredHandCount === 2
+                      ? 'Tampilkan kedua tangan terpisah di dalam bingkai untuk mulai.'
+                      : 'Tampilkan tangan di dalam bingkai untuk mulai.'
+                    : signId === 'teman'
                     ? 'Pisahkan kedua telunjuk di depan dada. Setelah hitungan, dekatkan hingga bertemu lalu tahan.'
                     : productionMode
                       ? 'Bersiap — peragakan kata dari ingatan setelah hitungan'
@@ -1113,7 +1221,7 @@ export function CameraPractice({
             <>
               {recordingProgress < 15 && (
                 <div className="pointer-events-none absolute inset-0 grid place-items-center">
-                  <span className="rounded-full bg-signal-teal px-6 py-3 text-2xl font-black text-signal-navy shadow-lg">
+                  <span className="rounded-full bg-[#F8A51D] px-6 py-3 text-2xl font-bold text-slate-900 shadow-lg">
                     Mulai!
                   </span>
                 </div>
@@ -1147,9 +1255,9 @@ export function CameraPractice({
 
           {/* Scoring overlay */}
           {practicePhase === 'scoring' && (
-            <div className="absolute inset-0 grid place-items-center bg-signal-navy/55 p-6 text-center backdrop-blur-sm">
+            <div className="absolute inset-0 grid place-items-center bg-slate-950/60 p-6 text-center backdrop-blur-sm">
               <div>
-                <LoaderCircle className="mx-auto size-8 animate-spin text-signal-teal" />
+                <LoaderCircle className="mx-auto size-8 animate-spin text-[#F8A51D]" />
                 <p className="mt-4 text-sm font-bold text-white">
                   Mengevaluasi gerakan…
                 </p>
@@ -1157,14 +1265,18 @@ export function CameraPractice({
             </div>
           )}
         </div>
+      </div>
 
-        {/* Unified Bottom Dark Status & Control Bar matching reference design */}
-        <div className="flex flex-col gap-4 border-t border-white/10 bg-[#0B0F19] px-6 py-4 text-white sm:flex-row sm:items-center sm:justify-between">
+      {/* Unified Bottom Control Bar matching rest of white cards */}
+        <div
+          ref={mobileControlsRef}
+          className="mt-5 scroll-mt-32 scroll-mb-36 flex flex-col gap-4 border-t border-slate-100 pt-4 sm:flex-row sm:items-center sm:justify-between"
+        >
           <div aria-live="polite">
-            <span className="text-[10px] sm:text-xs font-black uppercase tracking-wider text-[#00D5D1] block">
+            <span className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-slate-400 block">
               STATUS KAMERA
             </span>
-            <p className="mt-0.5 text-sm sm:text-base font-bold text-white">
+            <p className="mt-0.5 text-xs sm:text-sm font-bold text-slate-900">
               {practicePhase === 'countdown'
                 ? 'Bersiap…'
                 : practicePhase === 'recording'
@@ -1178,22 +1290,22 @@ export function CameraPractice({
                         : cameraStatusLabel(status, handCount)}
             </p>
             {errorMessage && (
-              <p className="mt-1 max-w-xl text-xs leading-5 text-signal-coral">
+              <p className="mt-1 max-w-xl text-xs leading-5 text-[#E54D2E] font-medium">
                 {errorMessage}
               </p>
             )}
           </div>
 
           {isReady && (
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="grid w-full grid-cols-1 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center">
               {practicePhase === 'idle' && (
                 <Button
                   type="button"
                   onClick={startPractice}
                   disabled={!canStartPractice}
-                  className="rounded-full bg-[#00D5D1] px-5 py-2 font-black text-slate-950 hover:bg-[#00BDCD] shadow-sm"
+                  className="w-full justify-center rounded-full bg-[#F8A51D] px-5 py-2 font-bold text-slate-950 hover:bg-[#E59312] shadow-xs cursor-pointer sm:w-auto"
                 >
-                  <Play className="size-4" />{' '}
+                  <Play className="size-4 fill-current" />{' '}
                   {productionMode ? 'Mulai uji' : 'Mulai latihan'}
                 </Button>
               )}
@@ -1202,7 +1314,7 @@ export function CameraPractice({
                   type="button"
                   variant="outline"
                   onClick={cancelPractice}
-                  className="rounded-full border-white/15 bg-white/5 text-white hover:bg-white/10"
+                  className="w-full justify-center rounded-full border-slate-200 bg-white text-slate-700 hover:bg-slate-50 text-xs font-bold cursor-pointer sm:w-auto"
                 >
                   <X className="size-4" /> Batalkan
                 </Button>
@@ -1212,7 +1324,7 @@ export function CameraPractice({
                 variant="outline"
                 onClick={retryPractice}
                 disabled={practicePhase !== 'idle' && practicePhase !== 'result'}
-                className="rounded-full border-white/15 bg-white/5 text-white hover:bg-white/10"
+                className="w-full justify-center rounded-full border-slate-200 bg-white text-slate-700 hover:bg-slate-50 text-xs font-bold cursor-pointer sm:w-auto"
               >
                 <RefreshCw className="size-4" /> Muat ulang
               </Button>
@@ -1220,7 +1332,7 @@ export function CameraPractice({
                 type="button"
                 variant="outline"
                 onClick={stopCamera}
-                className="rounded-full border-white/15 bg-white/5 text-white hover:bg-white/10"
+                className="w-full justify-center rounded-full border-slate-200 bg-white text-slate-700 hover:bg-slate-50 text-xs font-bold cursor-pointer sm:w-auto"
               >
                 <CameraOff className="size-4" /> Matikan
               </Button>
@@ -1233,10 +1345,10 @@ export function CameraPractice({
       {practicePhase === 'result' && gestureScore ? (
         <aside className="flex flex-col justify-between rounded-[2rem] bg-white p-6 sm:p-7 shadow-sm border border-amber-200/50">
           <div className="mb-5">
-            <p className="text-xs font-black uppercase tracking-[0.13em] text-[#E54D2E]">
+            <p className="text-xs font-bold uppercase tracking-[0.13em] text-[#E54D2E]">
               {productionMode ? 'Hasil uji peragaan' : 'Hasil latihan'}
             </p>
-            <h2 className="mt-2 text-2xl sm:text-3xl font-black tracking-tight text-slate-900">
+            <h2 className="mt-2 text-2xl sm:text-3xl font-bold tracking-tight text-slate-900">
               {gestureScore.assessable
                 ? practiceResultLabel(gestureScore, previouslyMastered)
                 : 'Belum bisa dinilai'}
@@ -1336,7 +1448,7 @@ export function CameraPractice({
           ) : null}
 
           <div className="mt-5 border-t border-signal-navy/10 pt-4">
-            <p className="mb-3 text-[0.65rem] font-black uppercase tracking-[0.12em] text-muted-foreground">
+            <p className="mb-3 text-[0.65rem] font-bold uppercase tracking-[0.12em] text-muted-foreground">
               Kualitas rekaman
             </p>
             <QualitativeMetric
@@ -1353,6 +1465,17 @@ export function CameraPractice({
           <p className="mt-5 text-sm leading-6 text-muted-foreground">
             {gestureScore.feedback}
           </p>
+          {!gestureScore.passed &&
+          gestureScore.assessable &&
+          gestureScore.handshape < 50 &&
+          (signId === 'apa' || signId === 'kapan' || signId === 'di-mana') ? (
+            <p className="mt-3 text-xs leading-5 text-amber-900">
+              Untuk tanda di dekat perut, jaga tinggi tangan seperti contoh,
+              tetapi beri sedikit ruang antara tangan dan baju. Mundurkan
+              kamera hingga perut dan ujung jari terlihat; periksa bentuk jari
+              pada video sebelum mencoba lagi.
+            </p>
+          ) : null}
           {!productionMode && !gestureScore.passed && previouslyMastered ? (
             <p className="mt-3 text-xs leading-5 text-emerald-800">
               Tanda {signLabel} sudah pernah lulus. Percobaan ulang ini tidak
@@ -1367,7 +1490,7 @@ export function CameraPractice({
           ) : null}
           <p className="mt-3 text-xs leading-5 text-muted-foreground">
             {!gestureScore.orientationAssessable && gestureScore.assessable
-              ? 'Arah telapak tidak ikut menentukan hasil karena tangan pada contoh bertumpuk hampir sepanjang gerakan. '
+              ? 'Arah telapak tidak ikut menentukan hasil karena sudut telapak tidak terbaca cukup andal pada percobaan ini. '
               : null}
             {gestureScore.positionRelativeToBody
               ? '“Posisi terhadap tubuh” membandingkan letak tangan dari bahu dan torso, sehingga tanda di kepala dan dada dapat dibedakan.'
@@ -1413,7 +1536,7 @@ export function CameraPractice({
 
           {gestureScore.passed && nextAction ? (
             <div className="mt-5 border border-signal-teal bg-signal-teal-soft p-4">
-              <p className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.12em] text-emerald-800">
+              <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.12em] text-emerald-800">
                 <Check className="size-4" strokeWidth={3} />{' '}
                 {nextAction.practiceComplete
                   ? 'Tahap Tirukan selesai'
@@ -1431,7 +1554,7 @@ export function CameraPractice({
                 href={nextAction.href}
                 className={cn(
                   buttonVariants(),
-                  'h-11 w-full rounded-full bg-[#00D5D1] font-black text-slate-900 hover:bg-[#00D5D1]/90',
+                  'h-11 w-full rounded-full bg-[#F8A51D] font-bold text-slate-900 hover:bg-[#E59312] shadow-xs cursor-pointer',
                 )}
               >
                 {nextAction.label} <ArrowRight className="size-4" />
@@ -1445,7 +1568,7 @@ export function CameraPractice({
                 href={`/missions/test?mission=${missionId}&mode=recognition`}
                 className={cn(
                   buttonVariants({ variant: 'outline' }),
-                  'h-11 w-full rounded-full border-2 border-[#00D5D1] font-black text-slate-900 hover:bg-[#00D5D1]/10',
+                  'h-11 w-full rounded-full border-2 border-[#F8A51D] font-bold text-slate-900 hover:bg-amber-50 cursor-pointer',
                 )}
               >
                 Lanjut ke Uji pengenalan <ArrowRight className="size-4" />
@@ -1457,10 +1580,10 @@ export function CameraPractice({
               variant={gestureScore.passed ? 'outline' : 'default'}
               onClick={retryPractice}
               className={cn(
-                'h-11 w-full rounded-full font-black',
+                'h-11 w-full rounded-full font-bold cursor-pointer',
                 gestureScore.passed
                   ? 'border-2 border-slate-200 text-slate-700 hover:bg-slate-100'
-                  : 'bg-[#00D5D1] text-slate-900 hover:bg-[#00D5D1]/90',
+                  : 'bg-[#F8A51D] text-slate-900 hover:bg-[#E59312] shadow-xs',
               )}
             >
               <RotateCcw className="size-4" /> Coba lagi
@@ -1472,10 +1595,10 @@ export function CameraPractice({
           <div>
             <div className="mb-7 flex items-center justify-between">
               <div>
-                <p className="text-xs font-black uppercase tracking-wider text-[#E54D2E]">
+                <p className="text-xs font-bold uppercase tracking-wider text-[#E54D2E]">
                   KALIBRASI
                 </p>
-                <h2 className="mt-1 text-xl sm:text-2xl font-black tracking-tight text-slate-900">
+                <h2 className="mt-1 text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
                   Sebelum berlatih
                 </h2>
               </div>
@@ -1502,7 +1625,7 @@ export function CameraPractice({
                       )}
                     </span>
                     <div>
-                      <span className="block text-sm font-black text-slate-900">
+                      <span className="block text-sm font-bold text-slate-900">
                         {check.label}
                       </span>
                       <span className="text-xs font-semibold text-slate-500">
@@ -1560,49 +1683,7 @@ function drawHandLandmarks(
   video: HTMLVideoElement,
   hands: HandObservation[],
 ) {
-  if (
-    canvas.width !== video.videoWidth ||
-    canvas.height !== video.videoHeight
-  ) {
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-  }
-
-  const context = canvas.getContext('2d');
-  if (!context) return;
-
-  context.clearRect(0, 0, canvas.width, canvas.height);
-  context.lineCap = 'round';
-  context.lineJoin = 'round';
-
-  for (const { landmarks } of hands) {
-    context.strokeStyle = '#55c7b5';
-    context.lineWidth = Math.max(3, canvas.width / 320);
-
-    for (const [startIndex, endIndex] of HAND_CONNECTIONS) {
-      const start = landmarks[startIndex];
-      const end = landmarks[endIndex];
-      if (!start || !end) continue;
-
-      context.beginPath();
-      context.moveTo(start.x * canvas.width, start.y * canvas.height);
-      context.lineTo(end.x * canvas.width, end.y * canvas.height);
-      context.stroke();
-    }
-
-    for (const [index, landmark] of landmarks.entries()) {
-      context.beginPath();
-      context.fillStyle = index === 0 ? '#f4c95d' : '#ff6f61';
-      context.arc(
-        landmark.x * canvas.width,
-        landmark.y * canvas.height,
-        index === 0 ? 7 : 5,
-        0,
-        Math.PI * 2,
-      );
-      context.fill();
-    }
-  }
+  drawHandLandmarkOverlay(canvas, video, hands, HAND_CONNECTIONS);
 }
 
 function readFrameLighting(
